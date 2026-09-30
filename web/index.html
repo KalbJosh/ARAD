@@ -1,0 +1,861 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>ARAD Beamer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@500;700;900&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
+<style>
+  /* Projektion: Schwarz = kein Licht. Alles ist Licht auf Schwarz. */
+  :root{
+    --cy:#00f0ff; --mg:#ff2bd6; --am:#ffc400; --red:#ff3355; --gold:#ffd400;
+    --txt:#e9fbff; --mute:#4d6a70; --dim:#22343a; --line:#0d3a42;
+    --disp:"Orbitron","Rajdhani",system-ui,sans-serif; --ui:"Rajdhani",system-ui,sans-serif;
+  }
+  /* fester Rahmen: nichts darf die Seite breiter machen (Android-Browser zoomen sonst heraus und schneiden rechts ab) */
+  html,body{margin:0;position:fixed;inset:0;width:100%;height:100%;background:#000;overflow:hidden;font-family:var(--ui);color:var(--txt);cursor:none;user-select:none}
+  body.cal{cursor:default}
+  #stage{position:fixed;inset:0;overflow:hidden;contain:strict}
+  #board{position:absolute;left:0;top:0;width:1400px;height:1400px;transform-origin:0 0}
+  #frame{position:absolute;inset:0;border:3px solid #0f0;display:none;pointer-events:none}
+  #pat{position:fixed;inset:0;width:100vw;height:100vh;z-index:100;display:none;background:#000}
+  body.cal #frame{display:block}
+  .handle{position:absolute;width:34px;height:34px;margin:-17px 0 0 -17px;border:3px solid #0f0;border-radius:50%;display:none;cursor:move;z-index:10;box-sizing:border-box}
+  .handle::after{content:'';position:absolute;left:12px;top:12px;width:4px;height:4px;background:#0f0}
+  .handle.sel{border-color:#ff0;box-shadow:0 0 0 4px #ff04}
+  .handle span{position:absolute;left:36px;top:4px;font:700 16px system-ui;color:#0f0}
+  body.cal .handle{display:block}
+
+  /* ---------- HUD-Scoreboard ---------- */
+  #panel{position:absolute;transform-origin:0 0;width:470px;padding:22px 24px 20px;box-sizing:border-box}
+  body.cal #panel{outline:2px dashed #0f0;outline-offset:6px}
+  .br{position:absolute;width:26px;height:26px;border:0 solid var(--cy);filter:drop-shadow(0 0 6px var(--cy))}
+  .br.tl{left:0;top:0;border-width:3px 0 0 3px}.br.tr{right:0;top:0;border-width:3px 3px 0 0}
+  .br.bl{left:0;bottom:0;border-width:0 0 3px 3px}.br.brr{right:0;bottom:0;border-width:0 3px 3px 0}
+  .scan{position:absolute;inset:0;overflow:hidden;pointer-events:none}
+  /* keine Dauer-Animationen: die Autodarts-Kameras sehen die Wand und werten Bewegung als Hand */
+  .scan::after{content:none}
+  @keyframes scan{to{top:100%}}
+
+  .head{display:flex;justify-content:space-between;align-items:center;margin-bottom:16px}
+  .logo{font:900 22px var(--disp);letter-spacing:.32em;color:var(--cy);text-shadow:0 0 12px var(--cy)}
+  .logo small{font:600 13px var(--ui);letter-spacing:.2em;color:var(--mute);margin-left:10px;text-shadow:none}
+  .link{font:700 13px var(--ui);letter-spacing:.22em;color:var(--mute);display:flex;align-items:center;gap:8px}
+  .link i{width:8px;height:8px;background:var(--cy);box-shadow:0 0 10px var(--cy)}
+  .link.off i{background:var(--red);box-shadow:0 0 10px var(--red)}
+  @keyframes blink{50%{opacity:.25}}
+  .meta{display:flex;justify-content:space-between;font:600 14px var(--ui);letter-spacing:.24em;color:var(--mute);border-top:1px solid var(--line);border-bottom:1px solid var(--line);padding:6px 2px;margin-bottom:10px}
+  .meta b{color:var(--cy);font-weight:700}
+
+  .pl{position:relative;display:grid;grid-template-columns:auto 1fr auto;align-items:end;gap:12px;padding:10px 2px;transition:opacity .4s}
+  .pl .ix{font:700 13px var(--disp);color:var(--mute);border:1px solid var(--dim);padding:3px 6px;margin-bottom:12px;clip-path:polygon(0 0,100% 0,100% 70%,80% 100%,0 100%)}
+  .pl .n{font:700 22px var(--ui);letter-spacing:.14em;text-transform:uppercase;color:var(--mute);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding-bottom:8px}
+  .pl .bar{display:block;height:3px;background:var(--dim);margin-top:6px;position:relative;width:150px}
+  .pl .bar u{position:absolute;left:0;top:0;bottom:0;background:var(--mute);transition:width .6s}
+  .pl .avg{display:block;font:600 13px var(--ui);letter-spacing:.18em;color:var(--dim);margin-top:4px}
+  .pl .s{font:700 60px var(--disp);line-height:1;font-variant-numeric:tabular-nums;color:var(--dim);transition:font-size .4s,color .4s}
+  .pl.cur .ix{color:#000;background:var(--cy);border-color:var(--cy);box-shadow:0 0 12px var(--cy)}
+  .pl.cur .n{color:var(--txt);font-size:28px}
+  .pl.cur .bar u{background:var(--cy);box-shadow:0 0 8px var(--cy)}
+  .pl.cur .avg{color:var(--mute)}
+  .pl.cur .s{font-size:104px;font-weight:900;color:var(--txt);text-shadow:0 0 18px rgba(0,240,255,.8),0 0 42px rgba(0,240,255,.35)}
+  .pl.won .s{color:var(--gold);text-shadow:0 0 20px var(--gold)}
+
+  .visit{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:14px}
+  .slot{position:relative;height:70px;display:flex;flex-direction:column;align-items:center;justify-content:center;font:900 24px var(--disp);color:var(--dim);background:var(--dim);clip-path:polygon(12px 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%,0 12px)}
+  .slot::before{content:'';position:absolute;inset:2px;background:#000;clip-path:inherit}
+  .slot>*{position:relative}
+  .slot .v{font:700 14px var(--ui);letter-spacing:.2em;opacity:.8;margin-top:2px}
+  .slot.f{background:currentColor;text-shadow:0 0 12px currentColor}
+  .slot.new{animation:lock .5s ease-out}
+  @keyframes lock{0%{transform:scale(1.4);filter:brightness(2.5)}40%{transform:scale(.94)}100%{transform:scale(1)}}
+
+  .foot{display:flex;justify-content:space-between;align-items:center;margin-top:14px;min-height:38px}
+  .sum{font:600 14px var(--ui);letter-spacing:.24em;color:var(--mute)}
+  .sum b{font:900 28px var(--disp);letter-spacing:0;color:var(--txt);margin-left:8px;text-shadow:0 0 12px rgba(0,240,255,.6)}
+  .co{display:flex;align-items:center;gap:6px;font:900 16px var(--disp);color:var(--mg);text-shadow:0 0 10px var(--mg)}
+  .co span{border:2px solid var(--mg);padding:5px 9px;box-shadow:0 0 10px rgba(255,43,214,.5),inset 0 0 8px rgba(255,43,214,.35);clip-path:polygon(8px 0,100% 0,100% calc(100% - 8px),calc(100% - 8px) 100%,0 100%,0 8px)}
+  .co em{font-style:normal;opacity:.7}
+  .tag{font:900 22px var(--disp);letter-spacing:.2em;color:var(--red);text-shadow:0 0 14px var(--red);animation:glitch .35s steps(2) 4}
+  @keyframes glitch{0%{transform:translate(0)}25%{transform:translate(-2px,1px)}50%{transform:translate(2px,-1px)}75%{transform:translate(-1px,0)}}
+  .win{margin-top:14px;text-align:center;font:900 26px var(--disp);letter-spacing:.2em;color:var(--gold);text-shadow:0 0 18px var(--gold);border:2px solid var(--gold);padding:10px;box-shadow:0 0 24px var(--gold)}
+  @keyframes pulse{from{box-shadow:0 0 0 var(--gold)}to{box-shadow:0 0 30px var(--gold),inset 0 0 20px rgba(255,212,0,.3)}}
+  .snd{margin-top:12px;font:700 14px var(--ui);letter-spacing:.2em;color:var(--am);text-shadow:0 0 10px var(--am)}
+  .last{margin-top:10px;font:600 14px var(--ui);letter-spacing:.14em;color:var(--mute);text-transform:uppercase}
+
+  #help{position:absolute;left:16px;bottom:14px;font-size:17px;line-height:1.45;color:#0f0;display:none;max-width:60vw;background:#000c;padding:8px 12px;border-radius:8px;font-family:system-ui}
+  body.cal #help{display:block}
+</style>
+</head>
+<body>
+<div id="stage"><canvas id="board" width="1400" height="1400"></canvas></div>
+<div id="frame"></div>
+<canvas id="pat"></canvas>
+<div id="panel"></div>
+<div class="handle" data-i="0"><span>20</span></div>
+<div class="handle" data-i="1"><span>6</span></div>
+<div class="handle" data-i="2"><span>3</span></div>
+<div class="handle" data-i="3"><span>11</span></div>
+<div class="handle" data-i="4"><span>Score</span></div>
+<div id="help">
+  <b>Kalibrierung</b> – grüne Punkte auf die <b>Außenkante des Doppelrings</b> bei 20 / 6 / 3 / 11.
+  Am bequemsten per Handy: <b id="rurl"></b><br>
+  Hier: Punkt ziehen · <b>OK/Enter</b> nächster Punkt · <b>Pfeile</b> 1 px (Shift 10 px) · <b>C</b> fertig
+</div>
+
+<script>
+// ================= Geometrie (mm, offizielle Maße, Board-Canvas) =================
+const S = 1400, C = S / 2, MM = 2.0;               // Canvas deckt ±350 mm ab (Scheibe, HUD-Ring, Surround)
+const R = { bull: 6.35, obull: 15.9, tIn: 99, tOut: 107, dIn: 162, dOut: 170 };
+const ORDER = [20,1,18,4,13,6,10,15,2,17,3,19,7,16,8,11,14,9,12,5];
+const SRC = [[0,-170],[170,0],[0,170],[-170,0]].map(([x,y]) => [C + x*MM, C + y*MM]);
+const DEG = Math.PI / 180, TAU = Math.PI * 2;
+const CY = '#00f0ff', MG = '#ff2bd6', AM = '#ffc400', RED = '#ff3355', GOLD = '#ffd400';
+const DART_COL = [CY, MG, AM];                       // Dart 1/2/3
+const KIND_COL = { bust: RED, win: GOLD };
+const F_DISP = '"Orbitron","Rajdhani",system-ui,sans-serif', F_UI = '"Rajdhani",system-ui,sans-serif';
+
+const qs = new URLSearchParams(location.search);
+const WS_URL = qs.get('ws') || location.origin.replace(/^http/, 'ws') + '/ws';
+
+const board = document.getElementById('board');
+const ctx = board.getContext('2d');
+const panel = document.getElementById('panel');
+const handles = [...document.querySelectorAll('.handle')];
+document.getElementById('rurl').textContent = location.host + '/remote';
+
+let st = null;                 // letzter Snapshot der Bridge
+let calib = null, calibMode = false;
+let fxQueue = [];              // {darts, t0, ms, kind, sum, rest, player}
+let hudBoost = 0, hudRot = 0;              // HUD-Ring kurz schneller/heller nach Treffern
+
+// ================= Homographie (Board-Canvas -> Beamerbild) =================
+function solve(A, b) {
+  const n = b.length;
+  for (let i = 0; i < n; i++) {
+    let p = i;
+    for (let r = i + 1; r < n; r++) if (Math.abs(A[r][i]) > Math.abs(A[p][i])) p = r;
+    [A[i], A[p]] = [A[p], A[i]]; [b[i], b[p]] = [b[p], b[i]];
+    for (let r = i + 1; r < n; r++) {
+      const f = A[r][i] / A[i][i];
+      for (let c = i; c < n; c++) A[r][c] -= f * A[i][c];
+      b[r] -= f * b[i];
+    }
+  }
+  const x = new Array(n);
+  for (let i = n - 1; i >= 0; i--) {
+    let s = b[i];
+    for (let c = i + 1; c < n; c++) s -= A[i][c] * x[c];
+    x[i] = s / A[i][i];
+  }
+  return x;
+}
+function homography(s, d) {
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = s[i], [u, v] = d[i];
+    A.push([x, y, 1, 0, 0, 0, -u*x, -u*y]); b.push(u);
+    A.push([0, 0, 0, x, y, 1, -v*x, -v*y]); b.push(v);
+  }
+  return solve(A, b);
+}
+const px = ([x, y]) => [x * innerWidth, y * innerHeight];
+function layout() {
+  if (!calib) return;
+  const dst = calib.pts.map(px);
+  const k = homography(SRC, dst);
+  board.style.transform =
+    `matrix3d(${k[0]},${k[3]},0,${k[6]}, ${k[1]},${k[4]},0,${k[7]}, 0,0,1,0, ${k[2]},${k[5]},0,1)`;
+  dst.forEach((p, i) => { handles[i].style.left = p[0] + 'px'; handles[i].style.top = p[1] + 'px'; });
+  const pn = calib.panel;
+  let sc = pn.scale, pxl, pyl;
+  const pw = panel.offsetWidth, ph = panel.offsetHeight, M = 12;
+  if (pn.auto !== false) {
+    // Fest in die Ecke oben links (Beamer mittig, Score links, Scheibe rechts). So groß wie Platz bis zum
+    // Schaumstoffring ist – nie hinein. Liegt die Scheibe links, automatisch oben rechts.
+    const ring = Math.max(Math.max(calib.light.radiusMm, 226) + (calib.light.hud === false ? 0 : 27), pn.surroundMm || 0) + (pn.gapMm ?? 30);
+    let minX = Infinity, maxX = -Infinity;
+    for (let a = 0; a < 36; a++) {
+      const [x] = mapPt(k, C + Math.cos(a * 10 * DEG) * P(ring), C + Math.sin(a * 10 * DEG) * P(ring));
+      minX = Math.min(minX, x); maxX = Math.max(maxX, x);
+    }
+    const roomL = minX - 2 * M, roomR = innerWidth - maxX - 2 * M, right = roomR > roomL;
+    const room = Math.max(roomL, roomR);
+    sc = Math.max(0.35, Math.min(sc, room / pw, (innerHeight - 2 * M) / ph));
+    pxl = right ? innerWidth - M - pw * sc : M;
+    pyl = M;
+  } else [pxl, pyl] = px([pn.x, pn.y]);
+  pxl = Math.max(M, Math.min(innerWidth - pw * sc - M, pxl));
+  pyl = Math.max(M, Math.min(innerHeight - ph * sc - M, pyl));
+  panelPos = [pxl / innerWidth, pyl / innerHeight];
+  panel.style.left = pxl + 'px'; panel.style.top = pyl + 'px';
+  panel.style.transform = `scale(${sc})`;
+  handles[4].style.left = pxl + 'px'; handles[4].style.top = pyl + 'px';
+}
+function mapPt(k, x, y) {
+  const w = k[6] * x + k[7] * y + 1;
+  return [(k[0] * x + k[1] * y + k[2]) / w, (k[3] * x + k[4] * y + k[5]) / w];
+}
+let panelPos = [0, 0];
+
+// ================= Kalibrierung direkt am Beamer (Maus / Tastatur / TV-Fernbedienung) =================
+let sel = 0, drag = -1;
+function selectHandle(i) { sel = i; handles.forEach((h, j) => h.classList.toggle('sel', j === i)); }
+function getPoint(i) { return i === 4 ? panelPos : calib.pts[i]; }
+function setPoint(i, p) {
+  if (i === 4) { calib.panel.auto = false; calib.panel.x = p[0]; calib.panel.y = p[1]; } else calib.pts[i] = p;
+  layout();
+}
+let sendT = 0;
+function sendCalib(now) {
+  clearTimeout(sendT);
+  sendT = setTimeout(() => send({ type: 'calib', calib, from: 'beamer' }), now ? 0 : 120);
+}
+handles.forEach((h, i) => h.addEventListener('pointerdown', e => { drag = i; selectHandle(i); h.setPointerCapture(e.pointerId); }));
+addEventListener('pointermove', e => { if (drag >= 0) { setPoint(drag, [e.clientX / innerWidth, e.clientY / innerHeight]); sendCalib(); } });
+addEventListener('pointerup', () => { if (drag >= 0) { drag = -1; sendCalib(true); } });
+
+addEventListener('keydown', e => {
+  const k = e.key.toLowerCase();
+  if (k === 'c' || e.key === 'ContextMenu') { send({ type: 'calibMode', on: !calibMode }); return; }
+  if (k === 't') { send({ type: 'test', seg: randomSeg() }); return; }
+  if (k === 'r') { send({ type: 'newGame' }); return; }
+  if (k === 'n') { send({ type: 'next' }); return; }
+  if (!calibMode) return;
+  if (e.key === 'Enter' || e.key === 'Tab') { selectHandle((sel + 1) % 5); e.preventDefault(); return; }
+  const d = { ArrowUp: [0,-1], ArrowDown: [0,1], ArrowLeft: [-1,0], ArrowRight: [1,0] }[e.key];
+  if (d) {
+    const s = e.shiftKey ? 10 : 1, [x, y] = getPoint(sel);
+    setPoint(sel, [x + d[0]*s/innerWidth, y + d[1]*s/innerHeight]); sendCalib(); e.preventDefault();
+  }
+});
+function randomSeg() {
+  const r = Math.random();
+  if (r < 0.05) return 'BULL';
+  if (r < 0.1) return '25';
+  return ['S','S','S','D','T'][Math.floor(Math.random()*5)] + (1 + Math.floor(Math.random()*20));
+}
+
+// ================= Checkout-Vorschlag (Double-Out) =================
+const DOUBLES = [20,16,8,18,12,10,4,6,14,2,19,17,15,13,11,9,7,5,3,1].map(n => ({ n: 'D' + n, v: n*2 })).concat([{ n: 'BULL', v: 50 }]);
+const SETUP = [];
+for (let n = 20; n >= 1; n--) SETUP.push({ n: 'T' + n, v: n*3, c: 3 });
+for (let n = 20; n >= 1; n--) SETUP.push({ n: 'S' + n, v: n, c: 0 });
+SETUP.push({ n: '25', v: 25, c: 2 }, { n: 'BULL', v: 50, c: 4 });
+const coCache = new Map();
+function checkout(rest, darts = 3) {
+  const key = rest + '/' + darts;
+  if (coCache.has(key)) return coCache.get(key);
+  let best = null;
+  const consider = (route, cost) => { if (!best || cost < best.cost) best = { route, cost }; };
+  if (rest <= 170 && rest >= 2) {
+    DOUBLES.forEach((d, di) => {
+      if (d.v === rest) consider([d.n], 100 + di);
+      if (darts >= 2) SETUP.forEach(a => {
+        if (a.v + d.v === rest) consider([a.n, d.n], 200 + a.c + di);
+        if (darts >= 3) SETUP.forEach(b => {
+          if (a.v + b.v + d.v === rest && a.v >= b.v) consider([a.n, b.n, d.n], 300 + a.c + b.c + di);
+        });
+      });
+    });
+  }
+  const r = best?.route || null;
+  coCache.set(key, r);
+  return r;
+}
+
+// ================= Zeichnen (alles in Board-mm) =================
+const P = mm => mm * MM;
+function segAngle(num) { return (-90 + ORDER.indexOf(num) * 18) * DEG; }
+function wedgePath(num, ri, ro) {
+  const a0 = segAngle(num) - 9*DEG, a1 = a0 + 18*DEG;
+  ctx.moveTo(C + Math.cos(a0)*P(ri), C + Math.sin(a0)*P(ri));
+  ctx.arc(C, C, P(ro), a0, a1);
+  ctx.arc(C, C, P(ri), a1, a0, true);
+  ctx.closePath();
+}
+function areaPath(d) {
+  ctx.beginPath();
+  if (d.number === 25) {
+    if (d.multiplier === 2) ctx.arc(C, C, P(R.bull), 0, TAU);
+    else { ctx.arc(C, C, P(R.obull), 0, TAU); ctx.moveTo(C + P(R.bull), C); ctx.arc(C, C, P(R.bull), 0, TAU, true); }
+    return true;
+  }
+  if (!d.multiplier || !d.number) return false;
+  if (d.multiplier === 3) wedgePath(d.number, R.tIn, R.tOut);
+  else if (d.multiplier === 2) wedgePath(d.number, R.dIn, R.dOut);
+  else if (d.bed === 'SingleInner') wedgePath(d.number, R.obull, R.tIn);
+  else if (d.bed === 'SingleOuter') wedgePath(d.number, R.tOut, R.dIn);
+  else { wedgePath(d.number, R.obull, R.tIn); wedgePath(d.number, R.tOut, R.dIn); }
+  return true;
+}
+// Einstichpunkt (Autodarts: 1.0 = 170 mm, y nach oben), sonst Feldmitte
+function hitPoint(d) {
+  if (d.coords && Number.isFinite(d.coords.x)) return [C + P(d.coords.x * 170), C - P(d.coords.y * 170)];
+  if (d.number === 25) return [C, C];
+  if (!d.multiplier) return null;
+  const r = { 1: d.bed === 'SingleInner' ? 60 : 135, 2: 166, 3: 103 }[d.multiplier], a = segAngle(d.number);
+  return [C + Math.cos(a)*P(r), C + Math.sin(a)*P(r)];
+}
+function label(d) {
+  if (!d.multiplier) return 'MISS';
+  if (d.number === 25) return d.multiplier === 2 ? 'BULL' : '25';
+  return 'SDT'[d.multiplier-1] + d.number;
+}
+const pts = d => (d?.number || 0) * (d?.multiplier || 0);
+const clamp01 = t => Math.min(1, Math.max(0, t));
+const ease = t => 1 - Math.pow(1 - clamp01(t), 3);
+const easeBack = t => { t = clamp01(t); const c = 1.7; return 1 + (c + 1) * Math.pow(t - 1, 3) + c * Math.pow(t - 1, 2); };
+
+function rgba(hex, a) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${n >> 16 & 255},${n >> 8 & 255},${n & 255},${a})`;
+}
+function glowText(txt, x, y, size, col, font = F_DISP, weight = 900, glow = 18) {
+  ctx.font = `${weight} ${size}px ${font}`;
+  ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ctx.lineJoin = 'round'; ctx.lineWidth = size * 0.18; ctx.strokeStyle = '#000'; ctx.strokeText(txt, x, y);
+  ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = glow; ctx.fillStyle = col; ctx.fillText(txt, x, y); ctx.restore();
+}
+
+// Scheibenlicht mit weicher Kante
+function drawLight(level) {
+  if (level <= 0.001) return;
+  const r = P(calib.light.radiusMm), col = calib.light.color || '#ffffff';
+  const g = ctx.createRadialGradient(C, C, r - P(8), C, C, r + P(2));
+  g.addColorStop(0, rgba(col, level)); g.addColorStop(1, rgba(col, 0));
+  ctx.beginPath(); ctx.arc(C, C, r + P(2), 0, TAU);
+  ctx.fillStyle = g; ctx.fill();
+}
+
+// HUD-Ring außerhalb der Scheibe: Skala, Segment-Marken, rotierende Bögen
+function drawHud(now, boost) {
+  if (calib.light.hud === false) return;
+  const r0 = P(Math.max(calib.light.radiusMm, 226) + 7);
+  const a = 0.4 + 0.6 * boost;
+  ctx.save();
+  ctx.strokeStyle = CY; ctx.shadowColor = CY; ctx.shadowBlur = 8 + 14 * boost;
+  ctx.globalAlpha = 0.45 * a; ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(C, C, r0, 0, TAU); ctx.stroke();
+  // Skala: alle 3°, lang alle 18° (Segmentgrenzen)
+  ctx.shadowBlur = 0; ctx.lineWidth = 1.5;
+  ctx.beginPath();
+  for (let i = 0; i < 120; i++) {
+    const an = (-99 + i * 3) * DEG, long = i % 6 === 0;
+    const r1 = r0 + P(2.5), r2 = r1 + P(long ? 7 : 3);
+    ctx.moveTo(C + Math.cos(an) * r1, C + Math.sin(an) * r1);
+    ctx.lineTo(C + Math.cos(an) * r2, C + Math.sin(an) * r2);
+  }
+  ctx.globalAlpha = 0.5 * a; ctx.stroke();
+  // rotierende Bögen
+  // Drehung nur während der Show; im Spiel steht der Ring still (sonst sieht Autodarts Bewegung)
+  hudRot += (1.4 * boost) / 60;
+  const rot = hudRot;
+  ctx.shadowBlur = 10 + 16 * boost; ctx.lineWidth = 4; ctx.globalAlpha = 0.8 * a;
+  for (let k = 0; k < 3; k++) {
+    ctx.beginPath(); ctx.arc(C, C, r0 + P(14), rot + k * TAU / 3, rot + k * TAU / 3 + 26 * DEG); ctx.stroke();
+  }
+  ctx.strokeStyle = MG; ctx.shadowColor = MG; ctx.lineWidth = 2.5; ctx.globalAlpha = 0.6 * a;
+  for (let k = 0; k < 4; k++) {
+    ctx.beginPath(); ctx.arc(C, C, r0 + P(19), -rot * 1.4 + k * TAU / 4, -rot * 1.4 + k * TAU / 4 + 12 * DEG); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+function drawWireframe() {
+  ctx.strokeStyle = '#0f0'; ctx.lineWidth = 2.5;
+  for (const r of [R.bull, R.obull, R.tIn, R.tOut, R.dIn, R.dOut]) { ctx.beginPath(); ctx.arc(C, C, P(r), 0, TAU); ctx.stroke(); }
+  ctx.setLineDash([10, 10]); ctx.strokeStyle = '#ff0';
+  ctx.beginPath(); ctx.arc(C, C, P(calib.light.radiusMm), 0, TAU); ctx.stroke(); ctx.setLineDash([]);
+  ctx.strokeStyle = '#0f0';
+  ctx.font = 'bold 36px system-ui'; ctx.fillStyle = '#0f0'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+  ORDER.forEach((n, i) => {
+    const a = (-99 + i*18) * DEG;
+    ctx.beginPath();
+    ctx.moveTo(C + Math.cos(a)*P(R.obull), C + Math.sin(a)*P(R.obull));
+    ctx.lineTo(C + Math.cos(a)*P(R.dOut), C + Math.sin(a)*P(R.dOut)); ctx.stroke();
+    const b = segAngle(n);
+    ctx.fillText(n, C + Math.cos(b)*P(193), C + Math.sin(b)*P(193));
+  });
+}
+
+// Zielerfassung: vier Winkel, die rotierend auf den Punkt einrasten
+function reticle(x, y, size, rot, col, alpha, lw = 4) {
+  ctx.save(); ctx.translate(x, y); ctx.rotate(rot);
+  ctx.strokeStyle = col; ctx.globalAlpha = alpha; ctx.lineWidth = lw; ctx.shadowColor = col; ctx.shadowBlur = 14;
+  const l = size * 0.5;
+  for (let k = 0; k < 4; k++) {
+    ctx.rotate(Math.PI / 2);
+    ctx.beginPath(); ctx.moveTo(size, size - l); ctx.lineTo(size, size); ctx.lineTo(size - l, size); ctx.stroke();
+  }
+  ctx.restore();
+}
+
+// Ein Dart: Scan-Linien -> Zielerfassung -> Feld in Neon -> Label an Leitlinie
+function drawDart(d, col, td, alpha, live) {
+  if (td < 0) return;
+  const hp = hitPoint(d);
+  const flash = live ? Math.max(0, 1 - td / 180) : 0;
+  const pulse = live ? 0.8 + 0.2 * Math.sin(td / 90) : 0.85;
+
+  if (hp && live && td < 520) {                    // Scan-Fadenkreuz über die ganze Scheibe
+    const p = ease(td / 260), fade = 1 - clamp01((td - 260) / 260);
+    ctx.save(); ctx.globalAlpha = alpha * fade * 0.8; ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.shadowColor = col; ctx.shadowBlur = 10;
+    const rr = P(R.dOut);
+    ctx.beginPath(); ctx.arc(C, C, rr, 0, TAU); ctx.clip();
+    ctx.beginPath();
+    ctx.moveTo(C - rr + (hp[0] - C + rr) * p, C - rr); ctx.lineTo(C - rr + (hp[0] - C + rr) * p, C + rr);
+    ctx.moveTo(C - rr, C - rr + (hp[1] - C + rr) * p); ctx.lineTo(C + rr, C - rr + (hp[1] - C + rr) * p);
+    ctx.stroke(); ctx.restore();
+  }
+  if (areaPath(d)) {
+    ctx.save(); ctx.shadowColor = col; ctx.shadowBlur = 36;
+    ctx.globalAlpha = alpha * pulse; ctx.fillStyle = col; ctx.fill('evenodd');
+    ctx.restore();
+    if (flash > 0) { ctx.globalAlpha = flash * alpha; ctx.fillStyle = '#fff'; ctx.fill('evenodd'); }
+    ctx.globalAlpha = alpha; ctx.lineWidth = 3; ctx.strokeStyle = '#fff'; ctx.stroke();
+  }
+  if (!hp) { ctx.globalAlpha = 1; return; }
+  const [cx, cy] = hp;
+  // Zielerfassung
+  const lock = ease((td - 120) / 380);
+  if (live) reticle(cx, cy, P(34 - 22 * lock), (1 - lock) * Math.PI, '#fff', alpha * clamp01(td / 120));
+  else reticle(cx, cy, P(10), 0, '#fff', alpha * 0.8, 3);
+  if (live) for (let w = 0; w < 2; w++) {
+    const p = (td - 300 - w * 150) / 700;
+    if (p < 0 || p > 1) continue;
+    ctx.beginPath(); ctx.arc(cx, cy, P(6 + ease(p) * 40), 0, TAU);
+    ctx.globalAlpha = (1 - p) * alpha; ctx.lineWidth = 6 * (1 - p) + 1; ctx.strokeStyle = w ? '#fff' : col; ctx.stroke();
+  }
+  ctx.globalAlpha = alpha;
+  ctx.beginPath(); ctx.arc(cx, cy, P(2.5), 0, TAU); ctx.fillStyle = '#fff'; ctx.fill();
+
+  // Leitlinie zum Label im Zahlenring
+  const bull = d.number === 25;
+  const an = bull ? -Math.PI / 2 : (Math.atan2(cy - C, cx - C) || -Math.PI / 2);
+  const lr = P(bull ? 60 : 204);
+  const lx = C + Math.cos(an) * lr, ly = C + Math.sin(an) * lr;
+  const lp = live ? ease((td - 250) / 250) : 1;
+  if (lp > 0) {
+    const ex = cx + (lx - cx) * lp, ey = cy + (ly - cy) * lp;
+    ctx.save(); ctx.globalAlpha = alpha * 0.9; ctx.strokeStyle = col; ctx.lineWidth = 2; ctx.setLineDash([6, 5]);
+    ctx.shadowColor = col; ctx.shadowBlur = 8;
+    const sx = cx + Math.cos(an) * P(12), sy = cy + Math.sin(an) * P(12);
+    ctx.beginPath(); ctx.moveTo(sx, sy); ctx.lineTo(ex, ey); ctx.stroke(); ctx.restore();
+  }
+  if (lp >= 1 || !live) {
+    const tIn = live ? clamp01((td - 500) / 220) : 1;
+    const txt = label(d);
+    const shown = txt.slice(0, Math.ceil(txt.length * tIn));   // „Tippen“
+    ctx.globalAlpha = alpha;
+    glowText(shown, lx, ly - 14, 56, col);
+    if (d.multiplier && tIn >= 1) glowText('+' + pts(d), lx, ly + 34, 28, '#ffffff', F_UI, 700, 10);
+  }
+  ctx.globalAlpha = 1;
+}
+
+// Sieg: goldener Lauf durch alle Segmente + Strahlen
+function drawWin(t, alpha) {
+  const k = Math.floor(t / 45) % 20;
+  for (let j = 0; j < 6; j++) {
+    const n = ORDER[(k - j + 20) % 20];
+    ctx.beginPath(); wedgePath(n, R.obull, R.dOut);
+    ctx.globalAlpha = alpha * (0.55 - j * 0.09); ctx.fillStyle = GOLD; ctx.fill();
+  }
+  ctx.save(); ctx.strokeStyle = GOLD; ctx.shadowColor = GOLD; ctx.shadowBlur = 20;
+  for (let w = 0; w < 3; w++) {
+    const p = ((t + w * 400) % 1200) / 1200;
+    ctx.globalAlpha = alpha * (1 - p); ctx.lineWidth = 5 * (1 - p) + 1;
+    ctx.beginPath(); ctx.arc(C, C, P(90 + p * 150), 0, TAU); ctx.stroke();
+  }
+  ctx.restore(); ctx.globalAlpha = 1;
+}
+function drawBurst(t, col, alpha) {             // 180 / Highscore
+  ctx.save(); ctx.strokeStyle = col; ctx.shadowColor = col; ctx.shadowBlur = 16; ctx.lineWidth = 4;
+  const p = ease(t / 700);
+  ctx.globalAlpha = alpha * (1 - clamp01((t - 500) / 900));
+  ctx.beginPath();
+  for (let i = 0; i < 40; i++) {
+    const a = i * TAU / 40 + 4.5 * DEG, r1 = P(100 + p * 30), r2 = P(110 + p * (i % 2 ? 50 : 90));
+    ctx.moveTo(C + Math.cos(a) * r1, C + Math.sin(a) * r1); ctx.lineTo(C + Math.cos(a) * r2, C + Math.sin(a) * r2);
+  }
+  ctx.stroke(); ctx.restore();
+}
+
+function drawFx(f, now) {
+  const t = now - f.t0, ms = f.ms;
+  const base = calib.light.on ? calib.light.level : 0;
+  const inn = ease(t / 160), out = ease((t - (ms - 380)) / 380);
+  drawLight(Math.max(0, base + (0.04 - base) * inn * (1 - out)));
+  const alpha = 1 - out;
+
+  if (f.kind === 'dart') {
+    const d = f.darts[0];
+    drawDart(d, DART_COL[d.i ?? 0], t, alpha, true);
+    return;
+  }
+  // Zusammenfassung der Aufnahme
+  const tint = KIND_COL[f.kind];
+  const sum = f.sum ?? f.darts.reduce((a, d) => a + pts(d), 0);
+  // replay: Darts rasten nacheinander ein (Fadenkreuz, Zielrahmen), danach kommt die Summe
+  const STEP = 420, rep = f.replay ? f.darts.length * STEP + 250 : 0;
+  const tc = t - rep;
+  if (tc > 0 && f.kind === 'win') drawWin(tc, alpha);
+  if (tc > 0 && f.kind === 'visit' && sum >= 100) drawBurst(tc, sum === 180 ? GOLD : CY, alpha);
+  f.darts.forEach((d, k) => {
+    const td = f.replay ? t - k * STEP : t - k * 90;
+    drawDart(d, (tc > 0 && tint) || DART_COL[d.i ?? k], td, alpha * 0.9, f.replay && td < 1100);
+  });
+  if (tc <= 0) return;
+
+  const col = tint || (sum === 180 ? GOLD : CY);
+  const pIn = easeBack(tc / 380);
+  // Anzeige oben auf dem schwarzen Surround (über HUD-Ring): nur dort hat Licht vollen Kontrast.
+  // Auf den bunten Segmenten kann der Beamer nichts abdunkeln – dort ginge die Zahl unter.
+  const yT = C - P(Math.max(calib.light.radiusMm, 226) + (calib.light.hud === false ? 16 : 38) + 20);
+  let big;
+  if (f.kind === 'bust') big = 'BUST';
+  else if (f.kind === 'win') big = 'CHECK';
+  else big = String(Math.round(sum * ease(tc / 550)));  // hochzählen
+  const size = big.length >= 5 ? 76 : 96;
+  const subA = f.kind === 'win' ? 'GAME SHOT' : f.kind === 'bust' ? 'BLEIBT' : 'REST';
+  const subB = f.kind === 'win' ? String(f.player || '').toUpperCase() : String(f.rest ?? '');
+  ctx.font = `900 ${size}px ${F_DISP}`; const bw = ctx.measureText(big).width;
+  ctx.font = `700 22px ${F_UI}`; const wa = ctx.measureText(subA).width + subA.length * 4;
+  ctx.font = `900 44px ${F_DISP}`; const wb = ctx.measureText(subB).width;
+  const sw = Math.max(wa, wb), gap = 26, tot = bw + gap + sw, x0 = -tot / 2;
+  ctx.save(); ctx.translate(C, yT); ctx.scale(pIn, pIn);
+  ctx.globalAlpha = alpha;
+  // HUD-Klammern links/rechts
+  ctx.strokeStyle = col; ctx.lineWidth = 3; ctx.shadowColor = col; ctx.shadowBlur = 10;
+  const L = 90 * ease(tc / 500);
+  for (const sg of [-1, 1]) {
+    const e = sg * (tot / 2 + 22);
+    ctx.beginPath(); ctx.moveTo(e, -34); ctx.lineTo(e, 34); ctx.moveTo(e, 0); ctx.lineTo(e + sg * L, 0); ctx.stroke();
+  }
+  ctx.shadowBlur = 0;
+  if (f.kind === 'bust' && tc < 700) {                   // Glitch
+    const j = (Math.random() - 0.5) * 14;
+    ctx.globalAlpha = alpha * 0.8;
+    glowText(big, x0 + bw / 2 - 6 + j, 0, size, CY, F_DISP, 900, 0);
+    glowText(big, x0 + bw / 2 + 6 - j, 0, size, MG, F_DISP, 900, 0);
+    ctx.globalAlpha = alpha;
+  }
+  glowText(big, x0 + bw / 2, 0, size, col === CY ? '#ffffff' : col, F_DISP, 900, 24);
+  const xs = x0 + bw + gap + sw / 2;
+  ctx.letterSpacing = '4px';
+  glowText(subA, xs, -22, 22, col, F_UI, 700, 8);
+  ctx.letterSpacing = '0px';
+  glowText(subB, xs, 16, 44, '#ffffff', F_DISP, 900, 14);
+  ctx.restore();
+  ctx.globalAlpha = 1;
+}
+
+let frameErr = 0;
+function frame(now) {
+  requestAnimationFrame(frame);                  // zuerst: Schleife läuft auch nach einem Fehler weiter
+  try {
+    ctx.setTransform(1, 0, 0, 1, 0, 0); ctx.globalAlpha = 1; ctx.shadowBlur = 0;
+    ctx.clearRect(0, 0, S, S);
+    fxQueue = fxQueue.filter(f => now < f.t0 + f.ms);
+    const started = fxQueue.filter(f => now >= f.t0), active = started[started.length - 1];
+    hudBoost = Math.max(active ? 1 : 0, hudBoost - 0.02);
+    if (!calib) return;
+    if (calibMode) { drawWireframe(); return; }
+    if (active) { try { drawFx(active, now); } catch (e) { report(e, 'fx'); drawLight(calib.light.on ? calib.light.level : 0); } }
+    else drawLight(calib.light.on ? calib.light.level : 0);
+    try { drawHud(now, hudBoost); } catch (e) { report(e, 'hud'); }
+  } catch (e) { report(e, 'frame'); }
+}
+// Fehler an die Bridge melden (Beamer-Browser sind oft älter) – jeder Fehler nur einmal
+const reported = new Set();
+function report(e, where) {
+  const msg = `${where}: ${e && e.message || e}`;
+  if (reported.has(msg) || reported.size > 20) return;
+  reported.add(msg);
+  try { send({ type: 'log', msg }); } catch {}
+}
+addEventListener('error', e => report(e.error || e.message, 'window@' + (e.lineno || '?')));
+addEventListener('unhandledrejection', e => report(e.reason, 'promise'));
+
+// ================= Scoreboard =================
+let lastVisitLen = 0;
+const shownScore = [];                 // für die Zähl-Animation der Restpunkte
+function esc(s) { return String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c])); }
+function tweenScores(scores) {
+  scores.forEach((to, i) => {
+    const el = panel.querySelector(`.pl[data-i="${i}"] .s`);
+    const from = shownScore[i] ?? to;
+    if (!el || from === to) { shownScore[i] = to; return; }
+    const t0 = performance.now();
+    const step = now => {
+      const p = ease((now - t0) / 700), v = Math.round(from + (to - from) * p);
+      const cur = panel.querySelector(`.pl[data-i="${i}"] .s`);
+      if (cur) cur.textContent = v;
+      shownScore[i] = v;
+      if (p < 1) requestAnimationFrame(step);
+    };
+    el.textContent = from;
+    requestAnimationFrame(step);
+  });
+}
+// Restpunkte sofort nach jedem Dart (bei Bust bleibt der alte Stand stehen)
+function liveScore(i) {
+  const { game, visit, pre } = st;
+  return i === game.cur && game.winner === null && visit.length && !pre.bust ? pre.rest : game.scores[i];
+}
+function renderPanel() {
+  if (!st) return;
+  const { game, visit, pre, board: b, lastResult: lr } = st;
+  const sum = visit.reduce((a, d) => a + pts(d), 0);
+  const online = b.online === true;
+  const avgN = i => { const s = game.stats?.[i]; return s && s.darts ? s.pts / s.darts * 3 : 0; };
+  const dartsLeft = 3 - visit.length;
+  const co = game.doubleOut && game.winner === null && !pre.bust && dartsLeft > 0 ? checkout(pre.rest, dartsLeft) : null;
+
+  let foot = '';
+  if (pre.bust) foot = `<span class="tag">BUST</span>`;
+  else if (co) foot = `<div class="co">${co.map(x => `<span>${x}</span>`).join('<em>›</em>')}</div>`;
+
+  panel.innerHTML =
+    `<i class="br tl"></i><i class="br tr"></i><i class="br bl"></i><i class="br brr"></i><div class="scan"></div>` +
+    `<div class="head"><span class="logo">ARAD<small>// X01</small></span>
+       <span class="link ${online ? '' : 'off'}"><i></i>${online ? 'LINK · ' + esc((b.status || '').toUpperCase()) : b.online === false ? 'NO LINK' : 'SYNC'}</span></div>` +
+    `<div class="meta"><span>MODE <b>${game.start}</b></span><span>${game.doubleOut ? 'DOUBLE OUT' : 'SINGLE OUT'}</span><span>T+ <b id="clock">00:00</b></span></div>` +
+    game.players.map((n, i) => {
+      const a = avgN(i);
+      return `<div class="pl ${i === game.cur && game.winner === null ? 'cur' : ''} ${game.winner === i ? 'won' : ''}" data-i="${i}">
+        <span class="ix">P${i + 1}</span>
+        <span class="n">${esc(n)}<span class="bar"><u style="width:${Math.min(100, a)}%"></u></span><span class="avg">AVG ${a ? a.toFixed(1) : '--.-'}</span></span>
+        <span class="s">${shownScore[i] ?? liveScore(i)}</span></div>`;
+    }).join('') +
+    `<div class="visit">${[0,1,2].map(i => {
+      const d = visit[i];
+      return d
+        ? `<div class="slot f ${i >= lastVisitLen ? 'new' : ''}" style="color:${DART_COL[i]}"><span>${label(d)}</span><span class="v">+${pts(d)}</span></div>`
+        : `<div class="slot"><span>0${i + 1}</span></div>`;
+    }).join('')}</div>` +
+    `<div class="foot"><span class="sum">SCORE<b>${String(sum).padStart(3, '0')}</b></span>${foot}</div>` +
+    (game.winner !== null ? `<div class="win">WINNER · ${esc(game.players[game.winner]).toUpperCase()}</div>` :
+      lr && !visit.length ? `<div class="last">Letzte Aufnahme ${esc(game.players[lr.player])} · ${lr.bust ? 'Bust' : lr.sum}</div>` : '') +
+    ((snd().caller !== false || snd().sfx !== false) && !audioReady() ? `<div class="snd">▶ OK / Taste drücken für Ton</div>` : '');
+  lastVisitLen = visit.length;
+  if (calib?.panel.auto !== false) layout();
+  tweenScores(game.scores.map((_, i) => liveScore(i)));
+  tickClock();
+}
+function tickClock() {
+  const el = document.getElementById('clock');
+  if (!el || !st) return;
+  const s = Math.max(0, Math.floor((Date.now() - st.game.legStart) / 1000));
+  el.textContent = String(Math.floor(s / 60)).padStart(2, '0') + ' MIN';   // nur minütlich ändern (Kameras)
+}
+setInterval(tickClock, 15000);
+
+// ================= Ton: Caller + Sci-Fi-Effekte (WebAudio) =================
+// Browser erlauben Ton erst nach einer Eingabe: einmal OK auf der Fernbedienung / Taste / Klick.
+let actx = null, master = null, sfxBus = null, voiceBus = null;
+const snd = () => calib?.sound || { caller: true, sfx: true, volume: 0.9 };
+function audio() {
+  if (!actx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return null;
+    actx = new AC();
+    master = actx.createGain(); master.connect(actx.destination);
+    const comp = actx.createDynamicsCompressor(); comp.connect(master);
+    sfxBus = actx.createGain(); sfxBus.gain.value = 0.55; sfxBus.connect(comp);
+    voiceBus = actx.createGain(); voiceBus.gain.value = 1; voiceBus.connect(comp);
+    actx.onstatechange = renderPanel;
+  }
+  master.gain.value = snd().volume ?? 0.9;
+  return actx;
+}
+const audioReady = () => actx && actx.state === 'running';
+function unlockAudio() { const a = audio(); if (a && a.state !== 'running') a.resume().then(renderPanel).catch(() => {}); }
+['keydown', 'pointerdown', 'touchstart'].forEach(ev => addEventListener(ev, unlockAudio, true));
+
+function tone(type, f0, f1, dur, gain, at = 0) {
+  const t = actx.currentTime + at, o = actx.createOscillator(), g = actx.createGain();
+  o.type = type; o.frequency.setValueAtTime(f0, t);
+  if (f1) o.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.012); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  o.connect(g); g.connect(sfxBus); o.start(t); o.stop(t + dur + 0.05);
+}
+let noiseBuf = null;
+function noise(dur, gain, f0, f1, at = 0, q = 1.2) {
+  if (!noiseBuf) {
+    noiseBuf = actx.createBuffer(1, actx.sampleRate, actx.sampleRate);
+    const d = noiseBuf.getChannelData(0); for (let i = 0; i < d.length; i++) d[i] = Math.random() * 2 - 1;
+  }
+  const t = actx.currentTime + at, src = actx.createBufferSource(), bp = actx.createBiquadFilter(), g = actx.createGain();
+  src.buffer = noiseBuf; bp.type = 'bandpass'; bp.Q.value = q;
+  bp.frequency.setValueAtTime(f0, t); bp.frequency.exponentialRampToValueAtTime(f1, t + dur);
+  g.gain.setValueAtTime(0.0001, t); g.gain.exponentialRampToValueAtTime(gain, t + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, t + dur);
+  src.connect(bp); bp.connect(g); g.connect(sfxBus); src.start(t); src.stop(t + dur + 0.05);
+}
+const SFX = {
+  dart(d) {                                            // Einschlag + Zielerfassung
+    const m = d.multiplier || 0;
+    if (!m) { tone('sine', 140, 55, 0.35, 0.5); noise(0.25, 0.2, 400, 120); return; }
+    noise(0.14, 0.35, 5000, 700);
+    tone('sawtooth', 900 + m * 250, 110, 0.2, 0.22);
+    tone('sine', 1760, 0, 0.06, 0.25, 0.32); tone('sine', 2350, 0, 0.09, 0.25, 0.39);
+    if (m === 3 || d.number === 25) { tone('triangle', 1320, 2640, 0.35, 0.18, 0.45); noise(0.4, 0.12, 8000, 3000, 0.45, 3); }
+  },
+  visit(sum) {
+    const base = sum >= 100 ? 523 : 392, n = sum === 180 ? 7 : sum >= 100 ? 5 : 3;
+    for (let i = 0; i < n; i++) tone('triangle', base * Math.pow(2, [0, 4, 7, 12, 16, 19, 24][i] / 12), 0, 0.28, 0.2, i * 0.07);
+    if (sum === 180) { tone('sawtooth', 130, 260, 1.2, 0.12, 0.1); noise(1.2, 0.15, 1500, 9000, 0.1, 0.8); }
+  },
+  bust() { tone('square', 196, 98, 0.45, 0.2); tone('square', 185, 92, 0.45, 0.16, 0.22); noise(0.5, 0.12, 300, 90); },
+  win() {
+    [0, 4, 7, 12, 7, 12, 16, 19, 24].forEach((st, i) => tone('triangle', 523 * Math.pow(2, st / 12), 0, 0.3, 0.2, i * 0.09));
+    tone('sawtooth', 110, 220, 1.6, 0.1, 0.2); noise(1.6, 0.14, 2000, 10000, 0.3, 0.7);
+  },
+};
+function playSfx(name, arg, delay = 0) {
+  if (snd().sfx === false || !audioReady()) return;
+  setTimeout(() => { try { SFX[name](arg); } catch (e) { console.warn(e); } }, delay);
+}
+
+// Caller: WAV von der Bridge (Piper), sonst Browser-Stimme
+const sayQ = [];
+let saying = false;
+function say(text, delay = 0) {
+  if (snd().caller === false || !audioReady()) return;
+  const buf = fetch('/tts?text=' + encodeURIComponent(text))
+    .then(r => { if (!r.ok) throw new Error('tts ' + r.status); return r.arrayBuffer(); })
+    .then(b => new Promise((res, rej) => actx.decodeAudioData(b, res, rej)));
+  sayQ.push({ text, buf, at: performance.now() + delay });
+  pumpSay();
+}
+async function pumpSay() {
+  if (saying) return;
+  const it = sayQ.shift();
+  if (!it) return;
+  saying = true;
+  try {
+    const wait = it.at - performance.now();
+    if (wait > 0) await new Promise(r => setTimeout(r, wait));
+    if (performance.now() - it.at < 5000) {             // veraltete Ansagen verwerfen
+      try {
+        const b = await it.buf;
+        await new Promise(r => { const src = actx.createBufferSource(); src.buffer = b; src.connect(voiceBus); src.onended = r; src.start(); });
+      } catch {
+        if ('speechSynthesis' in window) await new Promise(r => {
+          const u = new SpeechSynthesisUtterance(it.text); u.lang = 'en-GB'; u.rate = 0.95; u.onend = u.onerror = r;
+          speechSynthesis.speak(u);
+        });
+      }
+    }
+  } finally { saying = false; pumpSay(); }
+}
+
+// ================= Muster für die Auto-Kalibrierung (/calib) =================
+// Punktraster in normierten Beamer-Koordinaten; jeder Punkt blinkt in seinem Binärcode (i+1).
+const PAT = { cols: 10, rows: 6, margin: 0.06 };
+const dotPos = (i, G = PAT) => [G.margin + (1 - 2 * G.margin) * (i % G.cols) / (G.cols - 1),
+                                G.margin + (1 - 2 * G.margin) * Math.floor(i / G.cols) / (G.rows - 1)];
+const pat = document.getElementById('pat');
+function showPattern(p) {
+  if (!p) { pat.style.display = 'none'; return; }
+  const dpr = devicePixelRatio || 1, W = innerWidth * dpr, H = innerHeight * dpr;
+  pat.width = W; pat.height = H;
+  const g = pat.getContext('2d');
+  g.fillStyle = p.mode === 'white' ? '#c8c8c8' : '#000'; g.fillRect(0, 0, W, H);
+  if (p.mode === 'dots') {
+    const G = p.grid || PAT;                        // Rastergröße bzw. Punktliste kommt von der Kalibrierseite
+    const r = p.rN ? p.rN * H : Math.min(W, H) * (G.r || 0.014);   // rN: Radius relativ zur Bildhöhe
+    const n = p.pts ? p.pts.length : G.cols * G.rows;
+    g.fillStyle = '#fff';
+    for (let i = 0; i < n; i++) {
+      if (p.bit >= 0 && !(((i + 1) >> p.bit) & 1)) continue;
+      const [x, y] = p.pts ? p.pts[i] : dotPos(i, G);
+      g.beginPath(); g.arc(x * W, y * H, r, 0, TAU); g.fill();
+    }
+  }
+  pat.style.display = 'block';
+}
+
+// ================= WebSocket zur Bridge =================
+let ws, backoff = 500;
+function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+function onMsg(m) {
+  switch (m.type) {
+    case 'state':
+      if (st && st.game.legStart !== m.game.legStart) shownScore.length = 0;   // neues Spiel: nicht zählen
+      st = m;
+      if (drag < 0) calib = m.calib;
+      calibMode = m.calibMode;
+      document.body.classList.toggle('cal', calibMode);
+      layout(); renderPanel();
+      break;
+    case 'calib':
+      if (m.from !== 'beamer' || drag < 0) { calib = m.calib; layout(); }
+      if (master) master.gain.value = snd().volume ?? 0.9;
+      renderPanel();
+      break;
+    case 'fx':
+      fxQueue.push({ ...m, t0: performance.now() + (m.delay || 0) });
+      fxQueue.sort((a, b) => a.t0 - b.t0);
+      if (m.kind === 'dart') { /* Ton kommt schon mit 'hit' */ }
+      else {
+        const at = (m.delay || 0) + (m.replay ? m.darts.length * 420 + 250 : 0);   // Ton zur Summe, nach dem Einrasten
+        if (m.kind === 'bust' || m.kind === 'win') playSfx(m.kind, null, at);
+        else playSfx('visit', m.sum ?? 0, at);
+      }
+      break;
+    case 'reload':
+      location.reload();
+      break;
+    case 'runSetup': {
+      // Die Einrichtung läuft hier am Beamer (nicht am Handy): Handy darf ausgehen, kein WLAN-Hin-und-Her
+      if (document.getElementById('setupFrame')) break;
+      const f = document.createElement('iframe');
+      f.id = 'setupFrame'; f.src = '/calib?auto=1&t=' + Date.now();
+      f.style.cssText = 'position:fixed;left:0;top:0;width:10px;height:10px;opacity:0;pointer-events:none;border:0';
+      document.body.appendChild(f);
+      setTimeout(() => f.remove(), 240000);
+      break;
+    }
+    case 'hit':
+      playSfx('dart', m.dart);
+      break;
+    case 'say':
+      say(m.text, m.delay || 0);
+      break;
+    case 'calPattern':
+      showPattern(m.p);
+      // erst quittieren, wenn das Muster wirklich auf dem Bildschirm ist
+      {
+        let done = false;
+        const ack = () => { if (!done) { done = true; send({ type: 'calAck', id: m.id }); } };
+        requestAnimationFrame(() => requestAnimationFrame(ack));
+        setTimeout(ack, 150);   // falls der Browser Animation-Frames drosselt
+      }
+      break;
+  }
+}
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.onopen = () => {
+    backoff = 500;
+    const vv = window.visualViewport, de = document.documentElement, pr = document.getElementById('pat').getBoundingClientRect();
+    send({ type: 'log', msg: `Beamerseite verbunden: inner ${innerWidth}x${innerHeight} | visual ${vv ? Math.round(vv.width) + 'x' + Math.round(vv.height) + ' scale ' + vv.scale.toFixed(2) + ' off ' + Math.round(vv.offsetLeft) + ',' + Math.round(vv.offsetTop) : '-'} | client ${de.clientWidth}x${de.clientHeight} | screen ${screen.width}x${screen.height} | dpr ${devicePixelRatio} | 100vw ${Math.round(pr.width)}x${Math.round(pr.height)} | ${navigator.userAgent.replace(/.*(Android [^;]+).*(Chrome\/[\d.]+).*/, '$1 $2')}` });
+  };
+  ws.onmessage = e => { try { onMsg(JSON.parse(e.data)); } catch (err) { console.error(err); } };
+  ws.onclose = () => {
+    if (st) { st.board.online = false; renderPanel(); }
+    setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 5000);
+  };
+}
+
+selectHandle(0); connect(); requestAnimationFrame(frame);
+addEventListener('resize', layout);
+addEventListener('message', e => { if (e.data?.type === 'setupDone') setTimeout(() => document.getElementById('setupFrame')?.remove(), 1500); });
+if (navigator.wakeLock) navigator.wakeLock.request('screen').catch(() => {});
+</script>
+</body>
+</html>

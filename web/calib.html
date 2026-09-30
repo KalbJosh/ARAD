@@ -1,0 +1,750 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="theme-color" content="#0d0f12">
+<title>ARAD Kalibrierung</title>
+<style>
+  :root{--bg:#0d0f12;--card:#171a1f;--line:#2a2f37;--fg:#eef1f4;--mute:#8b94a1;--acc:#00e070;--warn:#ff5a5a;--cy:#00f0ff}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
+  main{max-width:720px;margin:0 auto;padding:12px 16px 40px}
+  h1{font-size:20px;margin:6px 0 12px;display:flex;justify-content:space-between;align-items:center}
+  h1 a{font-size:14px;color:var(--mute);text-decoration:none}
+  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
+  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);margin:0 0 10px}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
+  .row+.row{margin-top:8px}
+  button{font:inherit;color:var(--fg);background:#22272e;border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:44px;cursor:pointer;touch-action:manipulation}
+  button:disabled{opacity:.4}
+  button.pri{background:var(--acc);color:#000;border-color:transparent;font-weight:700}
+  .seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;flex:1}
+  .seg button{border:0;border-radius:0;flex:1;background:transparent;padding:10px 4px}
+  .seg button.on{background:#fff;color:#000}
+  .stage{position:relative;background:#000;border-radius:12px;overflow:hidden}
+  video,#view{display:block;width:100%;height:auto}
+  #view{touch-action:none}
+  video{position:absolute;inset:0;opacity:0;pointer-events:none}
+  .stage.live video{position:static;opacity:1}
+  .stage.live #view{position:absolute;inset:0;width:100%;height:100%}
+  #status{margin-top:10px;font-size:15px;min-height:1.4em}
+  #status.err{color:var(--warn)} #status.ok{color:var(--acc)}
+  .hint{font-size:13px;color:var(--mute);margin:8px 0 0}
+  ol{margin:6px 0 0;padding-left:20px;color:var(--mute);font-size:14px}
+  .bar{height:6px;background:#22272e;border-radius:3px;overflow:hidden;margin-top:8px}
+  .bar i{display:block;height:100%;width:0;background:var(--cy);transition:width .2s}
+</style>
+</head>
+<body>
+<main>
+  <h1>Auto-Kalibrierung <a id="back" href="#">← Remote</a></h1>
+
+  <section>
+    <h2>Automatisch (empfohlen)</h2>
+    <div class="row"><button class="pri" id="auto" style="flex:1">🎯 Beamer automatisch einrichten</button></div>
+    <p class="hint">Nutzt die Autodarts-Kameras: Beamer auf die Scheibe ausrichten, Score außerhalb des Schaumstoffrings andocken, Autodarts neu starten. Scheibe frei lassen, dauert ca. 40 s.</p>
+  </section>
+
+  <section>
+    <h2>Manuell mit Handy / einzelner Kamera</h2>
+    <div class="row"><div class="seg" id="src">
+      <button data-v="phone" class="on">Handy</button><button data-v="0">AD-Kam 1</button><button data-v="1">AD-Kam 2</button><button data-v="2">AD-Kam 3</button>
+    </div></div>
+    <ol>
+      <li>Raum möglichst dunkel, Beamer an.</li>
+      <li><b>Handy:</b> ganze Scheibe + etwas Wand drumherum ins Bild, Handy <b>ruhig</b> halten oder anlehnen (ca. 4 s).</li>
+      <li><b>AD-Kamera:</b> nimmt das Bild einer Autodarts-Kamera – kein Handy nötig. Eine Kamera reicht; der Beamer zeigt dafür ein dichteres Raster (ca. 8 s).</li>
+    </ol>
+  </section>
+
+  <section>
+    <div class="stage" id="stage"><video id="video" playsinline muted autoplay></video><canvas id="view"></canvas></div>
+    <div class="bar"><i id="prog"></i></div>
+    <div id="status">Bereit.</div>
+    <div class="row" style="margin-top:10px">
+      <button class="pri" id="scan" style="flex:1">Scan starten</button>
+    </div>
+    <div id="tapBox" hidden>
+      <p class="hint" id="tapHint">Die 4 Punkte auf die <b>Außenkante des Doppelrings</b> ziehen: <b>20</b> oben, <b>6</b> rechts, <b>3</b> unten, <b>11</b> links. Beim Ziehen erscheint eine Lupe.</p>
+      <div class="row" style="margin-top:10px">
+        <button class="pri" id="apply" style="flex:1">Kalibrierung übernehmen</button>
+        <button id="rescan">Neu scannen</button>
+      </div>
+    </div>
+  </section>
+</main>
+
+<script>
+const $ = id => document.getElementById(id);
+const WS_URL = location.origin.replace(/^http/, 'ws') + '/ws';
+$('back').href = `http://${location.hostname}:8090/remote`;
+
+// Muster (die Beamerseite zeichnet genau das Raster, das hier mitgeschickt wird)
+// Handy sieht alles -> grobes Raster. AD-Kamera sieht nur die Scheibe von der Seite -> dichtes Raster,
+// damit genug Punkte auf der Scheibe landen.
+const GRIDS = { phone: { cols: 10, rows: 6, margin: 0.06, r: 0.014 }, ad: { cols: 16, rows: 9, margin: 0.04, r: 0.011 } };
+let PAT = GRIDS.phone, NDOTS = 60, BITS = 6;
+function useGrid(G) { PAT = G; NDOTS = G.cols * G.rows; BITS = Math.ceil(Math.log2(NDOTS + 1)); }
+const dotPos = i => [PAT.margin + (1 - 2 * PAT.margin) * (i % PAT.cols) / (PAT.cols - 1),
+                     PAT.margin + (1 - 2 * PAT.margin) * Math.floor(i / PAT.cols) / (PAT.rows - 1)];
+const BOARD = [[0, -170], [170, 0], [0, 170], [-170, 0]];     // mm: 20 / 6 / 3 / 11, Außenkante Doppel
+const LABELS = ['20', '6', '3', '11'];
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+
+let lastLogged = '';
+function status(t, cls = '') {
+  $('status').textContent = t; $('status').className = cls;
+  if (t !== lastLogged) { lastLogged = t; try { send({ type: 'log', src: 'calib', msg: t, cls }); } catch {} }
+}
+function progress(p) { $('prog').style.width = Math.round(p * 100) + '%'; }
+
+// ---------------- WebSocket ----------------
+let ws, seq = 0;
+const acks = new Map();
+function connect() {
+  ws = new WebSocket(WS_URL);
+  ws.onmessage = e => {
+    const m = JSON.parse(e.data);
+    if (m.type === 'calAck' && acks.has(m.id)) { acks.get(m.id)(true); acks.delete(m.id); }
+    if ((m.type === 'calGranted' || m.type === 'calBusy') && lockWaiter) { lockWaiter(m.type === 'calGranted'); lockWaiter = null; }
+    if (m.type === 'state' || m.type === 'calib') curCalib = m.calib;
+    if (m.type === 'state') boardStatus = m.board?.status;
+  };
+  ws.onclose = () => setTimeout(connect, 1000);
+}
+const send = m => ws && ws.readyState === 1 && ws.send(JSON.stringify(m));
+function patternOnce(p) {
+  return new Promise(res => {
+    const id = ++seq; acks.set(id, res);
+    send({ type: 'calPattern', p, id });
+    setTimeout(() => { if (acks.has(id)) { acks.delete(id); res(false); } }, 2500);
+  });
+}
+// WLAN am Beamer hakt gelegentlich -> bis zu 3 Versuche, bevor wir aufgeben
+async function pattern(p) {
+  for (let a = 0; a < 3; a++) if (await patternOnce(p)) return true;
+  return false;
+}
+
+// ---------------- Bildquelle ----------------
+let source = 'phone', stream = null;
+const video = $('video'), view = $('view'), vctx = view.getContext('2d');
+const work = document.createElement('canvas'), wctx = work.getContext('2d', { willReadFrequently: true });
+const MAXW = 1280;
+
+async function startPhone() {
+  if (!navigator.mediaDevices?.getUserMedia) {
+    status(location.protocol === 'https:' ? 'Kamera wird von diesem Browser nicht unterstützt.' :
+      'Die Handy-Kamera braucht HTTPS – öffne https://' + location.hostname + ':8443/calib', 'err');
+    return false;
+  }
+  if (stream) return true;
+  try {
+    stream = await navigator.mediaDevices.getUserMedia({ audio: false, video: { facingMode: 'environment', width: { ideal: 1920 }, height: { ideal: 1080 } } });
+  } catch (e) { status('Kamera-Zugriff abgelehnt: ' + e.message, 'err'); return false; }
+  video.srcObject = stream;
+  await video.play().catch(() => {});
+  $('stage').classList.add('live');
+  return true;
+}
+function stopPhone() {
+  if (stream) stream.getTracks().forEach(t => t.stop());
+  stream = null; video.srcObject = null;
+  $('stage').classList.remove('live');
+}
+// Belichtung möglichst festhalten, damit die Bilder vergleichbar sind
+async function lockExposure(on) {
+  const t = stream?.getVideoTracks()[0];
+  if (!t?.getCapabilities) return;
+  const c = t.getCapabilities(), adv = {};
+  if (c.exposureMode?.includes(on ? 'manual' : 'continuous')) adv.exposureMode = on ? 'manual' : 'continuous';
+  if (c.whiteBalanceMode?.includes(on ? 'manual' : 'continuous')) adv.whiteBalanceMode = on ? 'manual' : 'continuous';
+  if (c.focusMode?.includes(on ? 'manual' : 'continuous')) adv.focusMode = on ? 'manual' : 'continuous';
+  try { await t.applyConstraints({ advanced: [adv] }); } catch {}
+}
+
+async function grabImage() {
+  let src, w, h;
+  if (source === 'phone') { src = video; w = video.videoWidth; h = video.videoHeight; }
+  else {
+    await (await fetch(`/ad/img/cams/${source}?t=${Date.now()}`, { cache: 'no-store' })).arrayBuffer().catch(() => {});   // Vorgängerbild verwerfen
+    const r = await fetch(`/ad/img/cams/${source}?t=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error('Autodarts-Kamera ' + (+source + 1) + ' liefert kein Bild (' + r.status + ')');
+    src = await createImageBitmap(await r.blob()); w = src.width; h = src.height;
+  }
+  if (!w) throw new Error('Kein Kamerabild');
+  const k = Math.min(1, MAXW / w);
+  work.width = Math.round(w * k); work.height = Math.round(h * k);
+  wctx.drawImage(src, 0, 0, work.width, work.height);
+  return wctx.getImageData(0, 0, work.width, work.height);
+}
+// Mittel aus n Bildern -> Helligkeit
+async function grabLum(n = 2) {
+  let L = null, img;
+  for (let k = 0; k < n; k++) {
+    img = await grabImage();
+    const d = img.data;
+    if (!L) L = new Float32Array(img.width * img.height);
+    for (let i = 0, j = 0; i < L.length; i++, j += 4) L[i] += (0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2]) / n;
+    if (k < n - 1) await sleep(source === 'phone' ? 70 : 150);
+  }
+  return { w: img.width, h: img.height, L };
+}
+
+// ---------------- Mathe: Homographien ----------------
+function solve(A, b) {
+  const n = b.length;
+  for (let i = 0; i < n; i++) {
+    let p = i;
+    for (let r = i + 1; r < n; r++) if (Math.abs(A[r][i]) > Math.abs(A[p][i])) p = r;
+    [A[i], A[p]] = [A[p], A[i]]; [b[i], b[p]] = [b[p], b[i]];
+    for (let r = i + 1; r < n; r++) {
+      const f = A[r][i] / A[i][i];
+      for (let c = i; c < n; c++) A[r][c] -= f * A[i][c];
+      b[r] -= f * b[i];
+    }
+  }
+  const x = new Array(n);
+  for (let i = n - 1; i >= 0; i--) {
+    let s = b[i];
+    for (let c = i + 1; c < n; c++) s -= A[i][c] * x[c];
+    x[i] = s / A[i][i];
+  }
+  return x;
+}
+const mul = (A, B) => A.map((r, i) => B[0].map((_, j) => r[0] * B[0][j] + r[1] * B[1][j] + r[2] * B[2][j]));
+function inv(m) {
+  const [a, b, c] = m[0], [d, e, f] = m[1], [g, h, i] = m[2];
+  const A = e * i - f * h, B = -(d * i - f * g), C = d * h - e * g, det = a * A + b * B + c * C;
+  return [[A / det, -(b * i - c * h) / det, (b * f - c * e) / det],
+          [B / det, (a * i - c * g) / det, -(a * f - c * d) / det],
+          [C / det, -(a * h - b * g) / det, (a * e - b * d) / det]];
+}
+const apply = (H, [x, y]) => { const w = H[2][0] * x + H[2][1] * y + H[2][2]; return [(H[0][0] * x + H[0][1] * y + H[0][2]) / w, (H[1][0] * x + H[1][1] * y + H[1][2]) / w]; };
+function normT(P) {
+  const mx = P.reduce((a, p) => a + p[0], 0) / P.length, my = P.reduce((a, p) => a + p[1], 0) / P.length;
+  const d = P.reduce((a, p) => a + Math.hypot(p[0] - mx, p[1] - my), 0) / P.length || 1, s = Math.SQRT2 / d;
+  return [[s, 0, -s * mx], [0, s, -s * my], [0, 0, 1]];
+}
+// Least-Squares-DLT mit Normierung (src -> dst)
+function fitH(src, dst) {
+  const Ts = normT(src), Td = normT(dst);
+  const S = src.map(p => apply(Ts, p)), D = dst.map(p => apply(Td, p));
+  const M = Array.from({ length: 8 }, () => new Array(8).fill(0)), r = new Array(8).fill(0);
+  const add = (row, v) => { for (let i = 0; i < 8; i++) { r[i] += row[i] * v; for (let j = 0; j < 8; j++) M[i][j] += row[i] * row[j]; } };
+  S.forEach(([x, y], k) => {
+    const [u, v] = D[k];
+    add([x, y, 1, 0, 0, 0, -u * x, -u * y], u);
+    add([0, 0, 0, x, y, 1, -v * x, -v * y], v);
+  });
+  const h = solve(M, r);
+  const H = mul(inv(Td), mul([[h[0], h[1], h[2]], [h[3], h[4], h[5]], [h[6], h[7], 1]], Ts));
+  const k = H[2][2]; return H.map(row => row.map(v => v / k));
+}
+// robust: Ausreißer (Spiegelungen, falsch gelesene Codes) entfernen
+function fitRobust(src, dst) {
+  let idx = src.map((_, i) => i), H = null, err = [];
+  for (let it = 0; it < 4; it++) {
+    if (idx.length < 6) return null;
+    H = fitH(idx.map(i => src[i]), idx.map(i => dst[i]));
+    err = src.map((p, i) => { const q = apply(H, p); return Math.hypot(q[0] - dst[i][0], q[1] - dst[i][1]); });
+    const med = [...idx.map(i => err[i])].sort((a, b) => a - b)[Math.floor(idx.length / 2)];
+    const lim = Math.max(2.5, 3 * med);
+    const next = src.map((_, i) => i).filter(i => err[i] < lim);
+    if (next.length === idx.length) break;
+    idx = next;
+  }
+  const rms = Math.sqrt(idx.reduce((a, i) => a + err[i] ** 2, 0) / idx.length);
+  return { H, inliers: idx, rms };
+}
+
+// ---------------- Punkterkennung ----------------
+function median(arr, step = 97) {
+  const s = []; for (let i = 0; i < arr.length; i += step) s.push(arr[i]);
+  s.sort((a, b) => a - b); return s[s.length >> 1];
+}
+// Albedo-normiert: (Muster - Schwarz) / (Weiß - Schwarz). Damit ist ein Punkt auf einem schwarzen
+// Segment genauso „1“ wie auf einem weißen – es zählt nur, ob dort Beamerlicht ankommt.
+function detectDots(B, A, bitFrames, Wf) {
+  const { w, h } = B, n = w * h;
+  const den = new Float32Array(n);
+  for (let i = 0; i < n; i++) { const d = Wf.L[i] - B.L[i]; den[i] = d > 6 ? d : 0; }
+  const norm = F => { const o = new Float32Array(n); for (let i = 0; i < n; i++) o[i] = den[i] ? (F.L[i] - B.L[i]) / den[i] : 0; return o; };
+  const D = norm(A);
+  const T = 0.45;
+  const seen = new Uint8Array(n), blobs = [];
+  const maxA = n * 0.004;
+  for (let s = 0; s < n; s++) {
+    if (seen[s] || D[s] < T) continue;
+    const stack = [s], px = []; seen[s] = 1;
+    while (stack.length) {
+      const i = stack.pop(); px.push(i);
+      const x = i % w, y = (i / w) | 0;
+      for (const j of [x > 0 ? i - 1 : -1, x < w - 1 ? i + 1 : -1, y > 0 ? i - w : -1, y < h - 1 ? i + w : -1])
+        if (j >= 0 && !seen[j] && D[j] >= T) { seen[j] = 1; stack.push(j); }
+    }
+    if (px.length < 4 || px.length > maxA) continue;
+    let sw = 0, sx = 0, sy = 0, sa = 0;
+    for (const i of px) { const v = D[i]; sw += v; sx += (i % w) * v; sy += ((i / w) | 0) * v; sa += v; }
+    blobs.push({ x: sx / sw + 0.5, y: sy / sw + 0.5, px, a: sa / px.length });   // +0.5: Pixelmitte
+  }
+  const bitN = bitFrames.map(norm);
+  const byIdx = new Map();
+  for (const b of blobs) {
+    let code = 0;
+    bitN.forEach((F, k) => {
+      let s = 0; for (const i of b.px) s += F[i];
+      if (s / b.px.length > 0.5 * b.a) code |= 1 << k;
+    });
+    const idx = code - 1;
+    if (idx < 0 || idx >= NDOTS) continue;
+    if (byIdx.has(idx)) byIdx.set(idx, null);       // doppelt gelesen -> verwerfen
+    else byIdx.set(idx, b);
+  }
+  const dots = [];
+  for (const [idx, b] of byIdx) if (b) dots.push({ idx, x: b.x, y: b.y });
+  return { dots, blobs: blobs.length };
+}
+
+// ---------------- Scheibe im Bild vorschlagen (rote/grüne Ringe) ----------------
+function guessBoard(img) {
+  const { width: w, height: h, data: d } = img;
+  const rg = new Uint8Array(w * h);
+  let cx = 0, cy = 0, cnt = 0;
+  for (let i = 0, j = 0; i < w * h; i++, j += 4) {
+    const r = d[j], g = d[j + 1], b = d[j + 2];
+    if ((r > 90 && r > 1.6 * g && r > 1.4 * b) || (g > 70 && g > 1.25 * r && g > 1.05 * b)) { rg[i] = 1; cx += i % w; cy += (i / w) | 0; cnt++; }
+  }
+  if (cnt < 300) return null;
+  cx /= cnt; cy /= cnt;
+  const maxR = Math.min(w, h) * 0.6;
+  return [[0, -1], [1, 0], [0, 1], [-1, 0]].map(([dx, dy]) => {
+    let last = 0, miss = 0;
+    for (let t = 4; t < maxR; t++) {
+      let hit = false;
+      for (let o = -2; o <= 2 && !hit; o++) {
+        const x = Math.round(cx + dx * t + dy * o), y = Math.round(cy + dy * t + dx * o);
+        if (x >= 0 && y >= 0 && x < w && y < h && rg[y * w + x]) hit = true;
+      }
+      // Lücke Triple -> Doppel ist ~50 % des Radius: erst abbrechen, wenn deutlich länger nichts kommt
+      if (hit) { last = t; miss = 0; } else if (last > maxR * 0.05 && ++miss > last * 0.75) break;
+    }
+    return last ? [cx + dx * last, cy + dy * last] : [cx + dx * maxR * 0.4, cy + dy * maxR * 0.4];
+  });
+}
+
+// Scheibe einpassen: 4 Punkte so verschieben, dass Doppel-/Triple-Ring auf den roten/grünen Pixeln liegen
+// und die Farbfolge stimmt (20 = rot, 1 = grün, ...). Klappt aus grober Startlage, auch bei schrägem Blick.
+function colorMap(img) {
+  const { width: w, height: h, data: d } = img, m = new Uint8Array(w * h);
+  for (let i = 0, j = 0; i < w * h; i++, j += 4) {
+    const r = d[j], g = d[j + 1], b = d[j + 2];
+    if (r > 90 && r > 1.6 * g && r > 1.4 * b) m[i] = 1;            // rot
+    else if (g > 70 && g > 1.25 * r && g > 1.05 * b) m[i] = 2;      // grün
+  }
+  return { m, w, h };
+}
+const RING_SAMPLES = (() => {
+  const s = [];
+  // Innen-/Außenkanten der Ringe: innen muss Farbe sein, knapp außerhalb keine -> rastet pixelgenau ein
+  for (let i = 0; i < 20; i++) for (const da of [-6, -3, 0, 3, 6]) {
+    const a = (-90 + i * 18 + da) * Math.PI / 180, want = i % 2 ? 2 : 1;
+    for (const r of [162.8, 166, 169.2, 99.8, 103, 106.2]) s.push({ p: [Math.cos(a) * r, Math.sin(a) * r], want });
+    for (const r of [160.3, 171.7, 97.3, 108.7, 135]) s.push({ p: [Math.cos(a) * r, Math.sin(a) * r], want: 0 });
+  }
+  return s;
+})();
+function boardScore(cm, T) {
+  const H = fitH(BOARD, T);
+  let sc = 0;
+  for (const { p, want } of RING_SAMPLES) {
+    const [x, y] = apply(H, p), xi = Math.round(x), yi = Math.round(y);
+    if (xi < 0 || yi < 0 || xi >= cm.w || yi >= cm.h) { if (want) sc -= 0.5; continue; }
+    const c = cm.m[yi * cm.w + xi];
+    sc += want ? (c === want ? 2 : c ? -2 : -0.3) : (c ? -1 : 0);
+  }
+  return sc;
+}
+// Startlagen aus der Ellipse aller roten/grünen Pixel, alle Drehungen gegen die Farbfolge geprüft
+function ellipseStarts(cm) {
+  let n = 0, mx = 0, my = 0, sxx = 0, syy = 0, sxy = 0;
+  for (let i = 0; i < cm.m.length; i += 2) if (cm.m[i]) { const x = i % cm.w, y = (i / cm.w) | 0; n++; mx += x; my += y; sxx += x * x; syy += y * y; sxy += x * y; }
+  if (n < 150) return [];
+  mx /= n; my /= n;
+  const a = sxx / n - mx * mx, c = syy / n - my * my, b = sxy / n - mx * my;
+  // symmetrische Wurzel der Kovarianz (keine Spiegelung)
+  const tr = a + c, det = a * c - b * b, sd = Math.sqrt(Math.max(det, 1e-9)), t = Math.sqrt(tr + 2 * sd);
+  // Pixel liegen v. a. auf Doppel (r 166) und Triple (r 103): E[r²] -> Faktor auf die Doppel-Außenkante
+  const k = Math.SQRT2 * 170 / Math.sqrt((166 ** 3 + 103 ** 3) / (166 + 103));
+  const A = [[(a + sd) / t * k, b / t * k], [b / t * k, (c + sd) / t * k]];
+  const out = [];
+  for (let deg = 0; deg < 360; deg += 6) {
+    const th = deg * Math.PI / 180, co = Math.cos(th), si = Math.sin(th);
+    out.push(BOARD.map(([x, y]) => {
+      const u = (co * x - si * y) / 170, v = (si * x + co * y) / 170;
+      return [mx + A[0][0] * u + A[0][1] * v, my + A[1][0] * u + A[1][1] * v];
+    }));
+  }
+  return out.map(T => ({ T, sc: boardScore(cm, T) })).sort((p, q) => q.sc - p.sc).slice(0, 8).map(o => o.T);
+}
+// Autodarts speichert je Kamera eine Homographie Kamerabild (px) -> Scheibe im 1000er-Raum
+// (Mitte 500/500, 20 oben). Maßstab an echten Kamerabildern ermittelt (beide Kameras, Ringe/Farben):
+// Doppel-Außenkante (170 mm) = 331 Einheiten.
+const AD_UNITS_PER_170 = 331;
+async function autodartsTaps(cam, imgW) {
+  try {
+    const g = await (await fetch('/ad/config/calibration/geometry', { cache: 'no-store' })).json();
+    const c = g.cams?.[cam];
+    if (!c?.calibrated || !c.homography || !c.width) return null;
+    const Hinv = inv(c.homography), R = AD_UNITS_PER_170, k = imgW / c.width;
+    const T = BOARD.map(([x, y]) => apply(Hinv, [500 + x / 170 * R, 500 + y / 170 * R]).map(v => v * k));
+    if (!T.every(p => p.every(Number.isFinite))) return null;
+    T.err = c.error_px || 0;
+    return T;
+  } catch { return null; }
+}
+function pickRotation(T, prior) {
+  const H = fitH(BOARD, T), c = apply(H, [0, 0]);
+  const up = prior ? (() => { const Hp = fitH(BOARD, prior), pc = apply(Hp, [0, 0]), p20 = apply(Hp, [0, -170]); return Math.atan2(p20[1] - pc[1], p20[0] - pc[0]); })()
+                   : -Math.PI / 2;                     // ohne Vorwissen: 20 im Bild oben
+  let best = null;
+  for (let k = 0; k < 10; k++) {
+    const th = k * 36 * Math.PI / 180, co = Math.cos(th), si = Math.sin(th);
+    const R = BOARD.map(([x, y]) => apply(H, [co * x - si * y, si * x + co * y]));
+    const a = Math.atan2(R[0][1] - c[1], R[0][0] - c[0]);
+    const d = Math.abs(Math.atan2(Math.sin(a - up), Math.cos(a - up)));
+    if (!best || d < best.d) best = { d, R };
+  }
+  return best.R;
+}
+function refineBoard(cm, T) {
+  T = T.map(p => [...p]);
+  let best = boardScore(cm, T);
+  for (const step of [24, 12, 6, 3, 1.5, 0.75]) {
+    for (let loop = 0, improved = true; improved && loop < 40; loop++) {
+      improved = false;
+      for (let k = 0; k < 8; k++) for (const sgn of [1, -1]) {
+        const c = T.map(p => [...p]); c[k >> 1][k & 1] += sgn * step;
+        const v = boardScore(cm, c);
+        if (v > best) { best = v; T = c; improved = true; }
+      }
+    }
+  }
+  return { T, score: best / (RING_SAMPLES.filter(s => s.want).length * 2) };
+}
+
+// ---------------- Ablauf ----------------
+let result = null, photo = null, taps = null, curCalib = null, boardStatus = null, lockWaiter = null;
+
+async function scan() {
+  $('tapBox').hidden = true; $('scan').disabled = true; result = null;
+  useGrid(source === 'phone' ? GRIDS.phone : GRIDS.ad);
+  try {
+    if (source === 'phone' && !(await startPhone())) return;
+    if (source === 'phone') { status('Kamera stellt sich ein … ruhig halten'); await sleep(1200); await lockExposure(true); }
+    if (source !== 'phone' && boardStatus === 'Stopped') throw new Error('Autodarts ist im Standby (Kameras aus) – in der Autodarts-App „Start“ drücken oder einen Dart werfen, dann nochmal scannen.');
+    const settle = source === 'phone' ? 380 : 700;
+    const steps = 3 + BITS; let k = 0;
+    const show = async p => { if (!(await pattern(p))) throw new Error('Beamer antwortet nicht – ist die Beamerseite offen?'); await sleep(settle); progress(++k / steps); };
+
+    status('Scanne … nicht bewegen');
+    await show({ mode: 'black' }); const B = await grabLum(3);
+    await show({ mode: 'white' }); const Wf = await grabLum(2); photo = await grabImage();
+    await show({ mode: 'dots', bit: -1, grid: PAT }); const A = await grabLum(2);
+    const bitFrames = [];
+    for (let b = 0; b < BITS; b++) { await show({ mode: 'dots', bit: b, grid: PAT }); bitFrames.push(await grabLum(2)); }
+    await pattern(null);
+    if (source === 'phone') await lockExposure(false);
+
+    const found = detectDots(B, A, bitFrames, Wf);
+    let dots = found.dots;
+    // AD-Kamera: Autodarts kennt die Scheibe in seinem Bild schon genau. Nur Punkte auf der Scheibe
+    // verwenden – die Wand dahinter ist eine andere Ebene und würde die Rechnung verzerren.
+    const adTaps = source !== 'phone' ? await autodartsTaps(+source, photo.width) : null;
+    if (adTaps) {
+      const Hcb = inv(fitH(BOARD, adTaps));
+      dots = dots.filter(d => { const q = apply(Hcb, [d.x, d.y]); return Math.hypot(q[0], q[1]) < 232; });
+    }
+    const fit = dots.length >= 6 ? fitRobust(dots.map(d => dotPos(d.idx)), dots.map(d => [d.x, d.y])) : null;
+    if (!fit) throw new Error(`Nur ${dots.length} Punkte ${adTaps ? 'auf der Scheibe ' : ''}erkannt (${found.dots.length} insgesamt, ${found.blobs} Lichtflecken). Raum dunkler oder Scheibenlicht heller.`);
+    result = { fit, dots };
+    if (adTaps) {
+      taps = adTaps;
+      status(`✓ ${fit.inliers.length} von ${dots.length} Punkten auf der Scheibe passen (Abweichung ${fit.rms.toFixed(1)} px). Scheibe aus der Autodarts-Kalibrierung übernommen (Kamerafehler ${adTaps.err.toFixed(1)} px) – Gitter prüfen, dann übernehmen.`, fit.rms < 4 ? 'ok' : '');
+      $('tapBox').hidden = false; draw();
+      return;
+    }
+    // Startlagen: aktuelle Kalibrierung (durch die neue Beamer->Kamera-Abbildung) und Farbsuche
+    const starts = [];
+    if (curCalib?.pts) starts.push(curCalib.pts.map(p => apply(fit.H, p)));
+    const g = guessBoard(photo); if (g) starts.push(g);
+    starts.push([[photo.width / 2, photo.height * 0.2], [photo.width * 0.7, photo.height / 2], [photo.width / 2, photo.height * 0.8], [photo.width * 0.3, photo.height / 2]]);
+    const cm = colorMap(photo);
+    starts.push(...ellipseStarts(cm));
+    let bestFit = null;
+    for (const s0 of starts) {
+      if (!s0.every(p => p.every(Number.isFinite))) continue;
+      const r = refineBoard(cm, s0);
+      if (!bestFit || r.score > bestFit.score) bestFit = r;
+    }
+    // Farbfolge wiederholt sich alle 36° -> unter den 10 gleich guten Drehungen die nehmen,
+    // bei der die 20 in dieselbe Richtung zeigt wie in der bisherigen Kalibrierung (Beamerbild steht aufrecht).
+    const prior = curCalib?.pts ? curCalib.pts.map(p => apply(fit.H, p)) : null;
+    taps = pickRotation(bestFit.T, prior);
+    stopPhone();
+    const auto = bestFit.score > 0.55;
+    status(`✓ ${fit.inliers.length} von ${dots.length} Punkten passen (Abweichung ${fit.rms.toFixed(1)} px). ` +
+      (auto ? `Scheibe automatisch erkannt (${Math.round(bestFit.score * 100)} %) – Gitter prüfen, dann übernehmen.` : 'Scheibe nicht sicher erkannt – die 4 Punkte auf den Doppelring ziehen.'), auto ? 'ok' : '');
+    $('tapBox').hidden = false;
+    draw();
+  } catch (e) {
+    await pattern(null);
+    if (source === 'phone') await lockExposure(false);
+    status(e.message, 'err');
+  } finally { $('scan').disabled = false; }
+}
+
+function applyCalib() {
+  const Hbc = fitH(BOARD, taps);                   // Scheibe (mm) -> Kamera
+  const Hcp = inv(result.fit.H);                   // Kamera -> Beamer (normiert)
+  const pts = BOARD.map(q => apply(Hcp, apply(Hbc, q)));
+  if (pts.some(p => !p.every(Number.isFinite))) return status('Rechnung fehlgeschlagen – bitte neu scannen.', 'err');
+  send({ type: 'calib', calib: { pts }, from: 'calib' });
+  send({ type: 'calibMode', on: true });
+  status('✓ Übernommen. Der Beamer zeigt jetzt das Gitter – passt es? Dann in der Remote „Kalibrierung beenden“.', 'ok');
+}
+
+// ================= Automatisch einrichten: alle Autodarts-Kameras, kein Handy, kein Ziehen =================
+// Jede Kamera rechnet ihre erkannten Beamer-Punkte über die Autodarts-Kalibrierung direkt in mm auf der
+// Scheibe um. Aus allen Kameras zusammen: Scheibe (mm) -> Beamer. Pass 1 grob übers ganze Bild,
+// Pass 2 dicht nur auf der Scheibe.
+const PROJ_W = 1920, PROJ_H = 1080;                      // Rechengröße Beamerbild (nur für die Fehler in px)
+// Autodarts nimmt Vollbilder nur auf Anforderung auf: jede Anfrage liefert das Bild der VORHERIGEN.
+// Deshalb erst ein Bild verwerfen, dann ist das nächste aktuell.
+const adFetch = i => fetch(`/ad/img/cams/${i}?t=${Date.now()}`, { cache: 'no-store' });
+async function grabLumCam(i, n = 2) {
+  await (await adFetch(i)).arrayBuffer().catch(() => {});
+  let L = null, img;
+  for (let k = 0; k < n; k++) {
+    const r = await fetch(`/ad/img/cams/${i}?t=${Date.now()}`, { cache: 'no-store' });
+    if (!r.ok) throw new Error(`Autodarts-Kamera ${i + 1} liefert kein Bild (${r.status})`);
+    const bmp = await createImageBitmap(await r.blob());
+    work.width = bmp.width; work.height = bmp.height; wctx.drawImage(bmp, 0, 0);
+    img = wctx.getImageData(0, 0, bmp.width, bmp.height);
+    if (!L) L = new Float32Array(img.width * img.height);
+    const d = img.data;
+    for (let q = 0, j = 0; q < L.length; q++, j += 4) L[q] += (0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2]) / n;
+  }
+  return { w: img.width, h: img.height, L, img };
+}
+const grabAll = (cams, n) => Promise.all(cams.map(c => grabLumCam(c.i, n)));
+// Autodarts liefert neue Bilder mit schwankender Verzögerung (gemessen 0,4–3,3 s, v. a. im Dunkeln).
+// Deshalb: so lange neu holen, bis sich das Bild gegenüber dem letzten Schritt geändert hat UND stabil ist.
+const lastFrame = new Map();
+function frameDiff(a, b) {
+  if (!a || !b || a.L.length !== b.L.length) return Infinity;
+  let n = 0; for (let q = 0; q < a.L.length; q += 7) if (Math.abs(a.L[q] - b.L[q]) > 18) n++;
+  return n;
+}
+async function grabFreshCam(i, maxMs = 4000) {
+  const t0 = performance.now(), prev = lastFrame.get(i);
+  await sleep(300);
+  let last = await grabLumCam(i, 1);
+  while (performance.now() - t0 < maxMs) {
+    await sleep(120);
+    const cur = await grabLumCam(i, 1);
+    if (frameDiff(cur, prev) > 25 && frameDiff(cur, last) < 10) { lastFrame.set(i, cur); return cur; }
+    last = cur;
+  }
+  lastFrame.set(i, last);                          // nichts geändert (Muster sieht für diese Kamera gleich aus)
+  return last;
+}
+const grabAllFresh = cams => Promise.all(cams.map(c => grabFreshCam(c.i)));
+const meanLum = F => { let s = 0; for (let q = 0; q < F.L.length; q += 97) s += F.L[q]; return s / (F.L.length / 97); };
+function camToMm(c, p, imgW) {                           // Kamerabild -> mm auf der Scheibe (Autodarts-Homographie)
+  const k = c.width / imgW, [u, v] = apply(c.homography, [p[0] * k, p[1] * k]);
+  return [(u - 500) / AD_UNITS_PER_170 * 170, (v - 500) / AD_UNITS_PER_170 * 170];
+}
+async function capturePass(cams, pts, rN, ref, onStep) {
+  const show = async p => { if (!(await pattern(p))) throw new Error('Beamer antwortet nicht – ist die Beamerseite offen?'); onStep(); };
+  let B = ref?.B, Wf = ref?.Wf;
+  if (!ref) {
+    await show({ mode: 'black' }); B = await grabAllFresh(cams);
+    await show({ mode: 'white' }); Wf = await grabAllFresh(cams);
+  }
+  const bits = Math.ceil(Math.log2(pts.length + 1));
+  await show({ mode: 'dots', bit: -1, pts, rN }); const A = await grabAllFresh(cams);
+  const bitF = [];
+  for (let b = 0; b < bits; b++) { await show({ mode: 'dots', bit: b, pts, rN }); bitF.push(await grabAllFresh(cams)); }
+  // Punkte je Kamera erkennen und in mm umrechnen, nur was auf der Scheibe liegt (Wand = andere Ebene)
+  NDOTS = pts.length;
+  const corr = [];
+  cams.forEach((c, ci) => {
+    const { dots } = detectDots(B[ci], A[ci], bitF.map(f => f[ci]), Wf[ci]);
+    for (const d of dots) {
+      const mm = camToMm(c, [d.x, d.y], B[ci].w);
+      if (Math.hypot(mm[0], mm[1]) < 225) corr.push({ mm, p: [pts[d.idx][0] * PROJ_W, pts[d.idx][1] * PROJ_H], cam: c.i });
+    }
+  });
+  return { B, Wf, corr };
+}
+async function autoSetup() {
+  $('auto').disabled = $('scan').disabled = true; $('tapBox').hidden = true; progress(0);
+  try {
+    // Beamerseite muss da sein (verbindet sich nach einem Bridge-Neustart erst nach ein paar Sekunden neu)
+    for (let t = 0; !(await patternOnce(null)); t++) {
+      if (t > 6) throw new Error('Die Beamerseite antwortet nicht. Beamer an? Seite http://' + location.hostname + ':8090/ am Beamer neu laden.');
+      status('Warte auf die Beamerseite …');
+    }
+    status('Starte Autodarts neu …');
+    const granted = await new Promise(res => { lockWaiter = res; send({ type: 'calBegin' }); setTimeout(() => { if (lockWaiter) { lockWaiter = null; res(true); } }, 3000); });
+    if (!granted) { status('Es läuft bereits eine Einrichtung – bitte warten.', 'err'); return; }
+    await sleep(4000);                                // Autodarts startet neu, Bridge hält sich bis zum Ende raus
+    const g = await (await fetch('/ad/config/calibration/geometry', { cache: 'no-store' })).json();
+    let cams = (g.cams || []).map((c, i) => ({ ...c, i })).filter(c => c.calibrated && c.width && c.homography);
+    if (!cams.length) throw new Error('Keine kalibrierte Autodarts-Kamera gefunden – zuerst in Autodarts „Calibrate“.');
+    const good = cams.filter(c => (c.error_px || 0) < 12);
+    const skipped = good.length && good.length < cams.length ? cams.length - good.length : 0;
+    if (good.length) cams = good;
+    // warten, bis die Kameras wirklich Bilder liefern (nach dem Neustart dauert das ein paar Sekunden)
+    for (let t = 0; ; t++) {
+      let f = null;
+      try { f = await grabAll(cams, 1); } catch {}
+      if (f && f.every(x => meanLum(x) > 4)) break;
+      if (t > 20) throw new Error('Autodarts-Kameras liefern keine Bilder. Läuft Autodarts? (Terminal-App: Status muss „Throw“ sein)');
+      status('Warte auf die Kameras …'); await sleep(1000);
+    }
+    for (const c of cams) lastFrame.set(c.i, await grabLumCam(c.i, 1));   // Ausgangsbild (normale Seite)
+    const total = 11 + 9; let step = 0; const onStep = () => progress(++step / total);
+    status(`Scan 1/2 mit ${cams.length} Kamera${cams.length > 1 ? 's' : ''} ${cams.map(c => c.i + 1).join(' + ')}${skipped ? ` (${skipped} mit zu großem Autodarts-Fehler übersprungen)` : ''} … Scheibe frei lassen`);
+    // Pass 1: Raster übers ganze Bild (Werte wie beim bewährten Einzelkamera-Scan: 16×9, Radius 1,1 % der Höhe).
+    // Zu wenig Punkte auf der Scheibe -> nochmal mit größeren Punkten.
+    const G1 = []; for (let y = 0; y < 9; y++) for (let x = 0; x < 16; x++) G1.push([0.04 + 0.92 * x / 15, 0.04 + 0.92 * y / 8]);
+    let p1 = await capturePass(cams, G1, 0.011, null, onStep);
+    if (p1.corr.length < 6) {
+      status(`Nur ${p1.corr.length} Punkte auf der Scheibe – versuche es mit größeren Punkten …`);
+      p1 = await capturePass(cams, G1, 0.017, p1, onStep);
+    }
+    if (p1.corr.length < 6) throw new Error(`Nur ${p1.corr.length} Punkte auf der Scheibe erkannt. Deckt das Beamerbild die Scheibe ab? Raum etwas dunkler machen.`);
+    let fit = fitRobust(p1.corr.map(c => c.mm), p1.corr.map(c => c.p));
+    if (!fit) throw new Error('Grobmessung passt nicht zusammen – bitte nochmal.');
+    // Pass 2: dichtes Raster nur auf der Scheibe (Abstand nach Beamer-Auflösung)
+    const pxPerMm = Math.hypot(...apply(fit.H, [100, 0]).map((v, i) => v - apply(fit.H, [0, 0])[i])) / 100;
+    const sp = Math.max(28, 30 / pxPerMm);
+    const G2 = [];
+    for (let y = -200; y <= 200; y += sp) for (let x = -200; x <= 200; x += sp)
+      if (Math.hypot(x, y) < 205 && G2.length < 126) { const q = apply(fit.H, [x, y]); G2.push([q[0] / PROJ_W, q[1] / PROJ_H]); }
+    status(`Scan 2/2: ${G2.length} Punkte auf der Scheibe …`);
+    const p2 = await capturePass(cams, G2, Math.max(4, Math.min(10, sp * pxPerMm * 0.22)) / PROJ_H, p1, onStep);
+    const all = [...p1.corr, ...p2.corr];
+    const fit2 = all.length >= 8 ? fitRobust(all.map(c => c.mm), all.map(c => c.p)) : null;
+    if (fit2) fit = fit2;
+    await pattern(null);
+    progress(1);
+    const pts = BOARD.map(q => { const [x, y] = apply(fit.H, q); return [x / PROJ_W, y / PROJ_H]; });
+    if (!pts.every(p => p.every(Number.isFinite))) throw new Error('Rechnung fehlgeschlagen – bitte nochmal.');
+    send({ type: 'calib', calib: { pts, panel: { auto: true, dy: 0 } }, from: 'calib' });
+    send({ type: 'calibMode', on: true });
+    const perCam = cams.map(c => `Kam ${c.i + 1}: ${all.filter(x => x.cam === c.i).length}`).join(', ');
+    const mmErr = fit.rms / pxPerMm;
+    status(`✓ Eingerichtet: ${fit.inliers.length} Punkte (${perCam}), Abweichung ${fit.rms.toFixed(1)} px ≈ ${mmErr.toFixed(1)} mm. Kontrollgitter 4 s …`, 'ok');
+    await sleep(4000);
+    send({ type: 'calibMode', on: false });
+    await sleep(800);
+    send({ type: 'adRestart', why: 'nach Beamer-Einrichtung' });   // neues Referenzbild unter normalem Licht
+    status(`✓ Fertig: Beamer auf die Scheibe eingerichtet (≈ ${mmErr.toFixed(1)} mm), Score angedockt, Autodarts neu gestartet.`, 'ok');
+    parent !== window && parent.postMessage({ type: 'setupDone' }, '*');
+  } catch (e) {
+    await pattern(null);
+    send({ type: 'calEnd' });
+    status(e.message, 'err');
+    parent !== window && parent.postMessage({ type: 'setupDone' }, '*');
+  } finally { $('auto').disabled = $('scan').disabled = false; }
+}
+
+// ---------------- Anzeige + Ziehen mit Lupe ----------------
+let dragI = -1, dragStart = null;
+const photoCanvas = document.createElement('canvas');
+function draw() {
+  if (!photo) return;
+  view.width = photo.width; view.height = photo.height;
+  if (photoCanvas.width !== photo.width || photoCanvas._src !== photo) {
+    photoCanvas.width = photo.width; photoCanvas.height = photo.height;
+    photoCanvas.getContext('2d').putImageData(photo, 0, 0); photoCanvas._src = photo;
+  }
+  vctx.drawImage(photoCanvas, 0, 0);
+  const sc = photo.width / view.clientWidth;          // CSS-px -> Bild-px
+  if (result) for (const d of result.dots) {
+    const inl = result.fit.inliers.includes(result.dots.indexOf(d));
+    vctx.fillStyle = inl ? '#00f0ff' : '#ff5a5a';
+    vctx.beginPath(); vctx.arc(d.x, d.y, 3 * sc, 0, 7); vctx.fill();
+  }
+  if (!taps) return;
+  // Vorschau: Doppelring aus den 4 Punkten
+  const H = fitH(BOARD, taps);
+  vctx.strokeStyle = '#00e070'; vctx.lineWidth = 1.5 * sc;
+  for (const r of [170, 162, 107, 99, 15.9]) {
+    vctx.beginPath();
+    for (let a = 0; a <= 64; a++) { const p = apply(H, [Math.cos(a / 32 * Math.PI) * r, Math.sin(a / 32 * Math.PI) * r]); a ? vctx.lineTo(...p) : vctx.moveTo(...p); }
+    vctx.stroke();
+  }
+  taps.forEach((p, i) => {
+    vctx.strokeStyle = i === dragI ? '#ffe600' : '#00e070'; vctx.lineWidth = 2.5 * sc;
+    vctx.beginPath(); vctx.arc(p[0], p[1], 12 * sc, 0, 7); vctx.stroke();
+    vctx.fillStyle = vctx.strokeStyle; vctx.font = `bold ${15 * sc}px system-ui`;
+    vctx.fillText(LABELS[i], p[0] + 15 * sc, p[1] - 12 * sc);
+  });
+  if (dragI >= 0) {                                  // Lupe in der gegenüberliegenden Ecke
+    const p = taps[dragI], R = 70 * sc, Z = 4;
+    const lx = p[0] < photo.width / 2 ? photo.width - R - 10 * sc : R + 10 * sc, ly = R + 10 * sc;
+    vctx.save(); vctx.beginPath(); vctx.arc(lx, ly, R, 0, 7); vctx.clip();
+    vctx.fillStyle = '#000'; vctx.fillRect(lx - R, ly - R, 2 * R, 2 * R);
+    vctx.imageSmoothingEnabled = false;
+    vctx.drawImage(photoCanvas, p[0] - R / Z, p[1] - R / Z, 2 * R / Z, 2 * R / Z, lx - R, ly - R, 2 * R, 2 * R);
+    vctx.restore();
+    vctx.strokeStyle = '#ffe600'; vctx.lineWidth = 2 * sc;
+    vctx.beginPath(); vctx.arc(lx, ly, R, 0, 7); vctx.moveTo(lx - 14 * sc, ly); vctx.lineTo(lx + 14 * sc, ly); vctx.moveTo(lx, ly - 14 * sc); vctx.lineTo(lx, ly + 14 * sc); vctx.stroke();
+  }
+}
+function toImg(e) { const r = view.getBoundingClientRect(), sc = photo.width / r.width; return [(e.clientX - r.left) * sc, (e.clientY - r.top) * sc]; }
+view.addEventListener('pointerdown', e => {
+  if (!taps) return;
+  const p = toImg(e), sc = photo.width / view.clientWidth;
+  let best = -1, bd = 45 * sc;
+  taps.forEach((t, i) => { const d = Math.hypot(t[0] - p[0], t[1] - p[1]); if (d < bd) { bd = d; best = i; } });
+  if (best < 0) return;
+  dragI = best; dragStart = { p, t: [...taps[best]] }; view.setPointerCapture(e.pointerId); draw();
+});
+view.addEventListener('pointermove', e => {
+  if (dragI < 0) return;
+  const p = toImg(e), f = 0.5;                     // halbe Geschwindigkeit = feiner als der Finger
+  taps[dragI] = [dragStart.t[0] + (p[0] - dragStart.p[0]) * f, dragStart.t[1] + (p[1] - dragStart.p[1]) * f];
+  draw();
+});
+['pointerup', 'pointercancel'].forEach(ev => view.addEventListener(ev, () => { dragI = -1; draw(); }));
+
+// ---------------- Bedienung ----------------
+$('src').onclick = e => {
+  const v = e.target.dataset.v; if (v === undefined) return;
+  source = v; [...$('src').children].forEach(b => b.classList.toggle('on', b === e.target));
+  if (v === 'phone') startPhone(); else { stopPhone(); previewAd(); }
+};
+async function previewAd() {
+  try { photo = await grabImage(); taps = null; result = null; draw(); status(`Autodarts-Kamera ${+source + 1} verbunden.`); }
+  catch (e) { status(e.message, 'err'); }
+}
+$('scan').onclick = scan;
+$('auto').onclick = autoSetup;
+$('rescan').onclick = scan;
+$('apply').onclick = applyCalib;
+
+connect();
+if (new URLSearchParams(location.search).has('auto')) {
+  const go = () => ws && ws.readyState === 1 ? autoSetup() : setTimeout(go, 200);
+  go();
+} else if (location.protocol === 'https:') startPhone();
+else status('Hinweis: Für die Handy-Kamera https://' + location.hostname + ':8443/calib öffnen. AD-Kameras gehen auch so.');
+</script>
+</body>
+</html>

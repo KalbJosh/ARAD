@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
+<meta name="theme-color" content="#0d0f12">
+<title>ARAD Kamera-Schärfe</title>
+<style>
+  :root{--bg:#0d0f12;--card:#171a1f;--line:#2a2f37;--fg:#eef1f4;--mute:#8b94a1;--acc:#00e070;--warn:#ffb000}
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif}
+  main{max-width:900px;margin:0 auto;padding:12px 16px 40px}
+  h1{font-size:20px;margin:6px 0 12px;display:flex;justify-content:space-between;align-items:center}
+  h1 a{font-size:14px;color:var(--mute);text-decoration:none}
+  .seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden;margin-bottom:10px}
+  .seg button{font:inherit;color:var(--fg);border:0;flex:1;background:transparent;padding:10px 4px;min-height:44px}
+  .seg button.on{background:#fff;color:#000}
+  .stage{position:relative;border-radius:12px;overflow:hidden;background:#000}
+  canvas{display:block;width:100%;height:auto;touch-action:none}
+  .meter{display:grid;grid-template-columns:auto 1fr auto;gap:12px;align-items:center;margin-top:12px}
+  .big{font:800 44px/1 system-ui;font-variant-numeric:tabular-nums}
+  .bar{height:18px;background:#22272e;border-radius:9px;position:relative;overflow:hidden}
+  .bar i{position:absolute;left:0;top:0;bottom:0;background:var(--acc);transition:width .15s}
+  .bar b{position:absolute;top:0;bottom:0;width:3px;background:#fff}
+  .hint{font-size:14px;color:var(--mute);margin:10px 0 0}
+  button.small{font:inherit;color:var(--fg);background:#22272e;border:1px solid var(--line);border-radius:10px;padding:8px 12px}
+</style>
+</head>
+<body>
+<main>
+  <h1>Kamera scharfstellen <a id="back" href="#">← Remote</a></h1>
+  <div class="seg" id="cam"><button data-v="0" class="on">Kamera 1</button><button data-v="1">Kamera 2</button><button data-v="2">Kamera 3</button></div>
+  <div class="stage"><canvas id="c"></canvas></div>
+  <div class="meter">
+    <span class="big" id="val">–</span>
+    <div class="bar"><i id="fill"></i><b id="peak"></b></div>
+    <button class="small" id="reset">Bestwert zurücksetzen</button>
+  </div>
+  <p class="hint">Objektiv langsam drehen: Der Balken zeigt die Schärfe im gelben Rahmen, der weiße Strich den besten bisher erreichten Wert.
+    Dorthin zurückdrehen, wo der Wert am höchsten war. Rahmen verschieben: ins Bild tippen (am besten auf die Scheibenmitte).<br>
+    Das ganze Bild inklusive <b>vorderem Doppelring</b> sollte die Scheibe zeigen – nichts darf am Rand abgeschnitten sein.</p>
+</main>
+<script>
+const $ = id => document.getElementById(id);
+$('back').href = `http://${location.hostname}:8090/remote`;
+const cv = $('c'), g = cv.getContext('2d', { willReadFrequently: true });
+let cam = 0, roi = null, peak = 0, running = true;
+
+$('cam').onclick = e => { const v = e.target.dataset.v; if (v === undefined) return;
+  cam = +v; peak = 0; [...$('cam').children].forEach(b => b.classList.toggle('on', b === e.target)); };
+$('reset').onclick = () => { peak = 0; };
+cv.addEventListener('pointerdown', e => {
+  const r = cv.getBoundingClientRect();
+  roi = { x: (e.clientX - r.left) / r.width, y: (e.clientY - r.top) / r.height };
+  peak = 0;
+});
+
+// Schärfe = Varianz des Laplace-Filters im Rahmen (hoch = viele feine Kanten = scharf)
+function sharpness(img, x0, y0, w, h) {
+  const d = img.data, W = img.width;
+  const L = (x, y) => { const j = (y * W + x) * 4; return 0.299 * d[j] + 0.587 * d[j + 1] + 0.114 * d[j + 2]; };
+  let s = 0, s2 = 0, n = 0;
+  for (let y = y0 + 1; y < y0 + h - 1; y++) for (let x = x0 + 1; x < x0 + w - 1; x++) {
+    const v = 4 * L(x, y) - L(x - 1, y) - L(x + 1, y) - L(x, y - 1) - L(x, y + 1);
+    s += v; s2 += v * v; n++;
+  }
+  return n ? s2 / n - (s / n) ** 2 : 0;
+}
+
+async function loop() {
+  while (running) {
+    try {
+      // Autodarts liefert je Anfrage das vorherige Bild -> fürs Live-Bild egal, Schleife holt ständig neu
+      const r = await fetch(`/ad/img/cams/${cam}?t=${Date.now()}`, { cache: 'no-store' });
+      if (!r.ok) throw new Error('Kamera ' + (cam + 1) + ': ' + r.status);
+      const bmp = await createImageBitmap(await r.blob());
+      cv.width = bmp.width; cv.height = bmp.height;
+      g.drawImage(bmp, 0, 0);
+      const W = cv.width, H = cv.height, rw = Math.round(W * 0.22), rh = Math.round(H * 0.22);
+      const cx = (roi ? roi.x : 0.5) * W, cy = (roi ? roi.y : 0.55) * H;
+      const x0 = Math.max(0, Math.min(W - rw, Math.round(cx - rw / 2))), y0 = Math.max(0, Math.min(H - rh, Math.round(cy - rh / 2)));
+      const v = sharpness(g.getImageData(x0, y0, rw, rh), 0, 0, rw, rh);
+      peak = Math.max(peak, v);
+      g.strokeStyle = '#ffe600'; g.lineWidth = 3; g.strokeRect(x0, y0, rw, rh);
+      $('val').textContent = Math.round(v);
+      const scale = Math.max(peak * 1.15, 1);
+      $('fill').style.width = (v / scale * 100) + '%';
+      $('fill').style.background = v >= peak * 0.95 ? '#00e070' : v >= peak * 0.8 ? '#ffb000' : '#ff5a5a';
+      $('peak').style.left = (peak / scale * 100) + '%';
+    } catch (e) {
+      $('val').textContent = '–';
+      g.fillStyle = '#000'; g.fillRect(0, 0, cv.width || 640, cv.height || 360);
+      g.fillStyle = '#ff5a5a'; g.font = '20px system-ui'; g.fillText(e.message, 20, 40);
+      await new Promise(r => setTimeout(r, 1000));
+    }
+  }
+}
+loop();
+</script>
+</body>
+</html>

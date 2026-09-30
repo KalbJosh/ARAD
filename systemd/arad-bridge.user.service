@@ -1,0 +1,15 @@
+# Benutzerdienst (ohne sudo): ~/.config/systemd/user/arad-bridge.service
+# Läuft dank "loginctl enable-linger" auch ohne Anmeldung ab dem Booten.
+[Unit]
+Description=ARAD Bridge (Autodarts -> Beamer/Handy per WebSocket)
+Wants=network-online.target
+After=network-online.target autodarts.service
+
+[Service]
+WorkingDirectory=%h/arad/bridge
+ExecStart=%h/.local/opt/node/bin/node server.js
+Restart=always
+RestartSec=3
+
+[Install]
+WantedBy=default.target

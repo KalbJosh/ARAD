@@ -1,0 +1,18 @@
+{
+  "boardManager": "http://127.0.0.1:3180",
+  "port": 8090,
+  "pollMs": 150,
+  "players": ["Josh", "Gast"],
+  "start": 501,
+  "doubleOut": true,
+  "fx": "visitEnd",
+  "visitEndMs": 3000,
+  "perDartMs": 1400,
+  "ledUrl": "",
+  "ledLevel": 100,
+  "caller": {
+    "piper": "~/.local/opt/piper/piper",
+    "voice": "~/.local/opt/piper/voices/en_GB-northern_english_male-medium.onnx",
+    "lengthScale": 1.05
+  }
+}

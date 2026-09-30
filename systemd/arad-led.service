@@ -1,0 +1,12 @@
+[Unit]
+Description=ARAD LED-Ring
+After=network-online.target
+
+[Service]
+ExecStart=/usr/bin/python3 /opt/arad/led/led.py
+Restart=always
+RestartSec=2
+User=root
+
+[Install]
+WantedBy=multi-user.target
