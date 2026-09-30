@@ -108,6 +108,7 @@ function connect() {
     const m = JSON.parse(e.data);
     if (m.type === 'calAck' && acks.has(m.id)) { acks.get(m.id)(true); acks.delete(m.id); }
     if ((m.type === 'calGranted' || m.type === 'calBusy') && lockWaiter) { lockWaiter(m.type === 'calGranted'); lockWaiter = null; }
+    if (m.type === 'adCalStarted' && adCalWaiter) { adCalWaiter(m); adCalWaiter = null; }
     if (m.type === 'state' || m.type === 'calib') curCalib = m.calib;
     if (m.type === 'state') boardStatus = m.board?.status;
   };
@@ -435,7 +436,7 @@ function refineBoard(cm, T) {
 }
 
 // ---------------- Ablauf ----------------
-let result = null, photo = null, taps = null, curCalib = null, boardStatus = null, lockWaiter = null;
+let result = null, photo = null, taps = null, curCalib = null, boardStatus = null, lockWaiter = null, adCalWaiter = null, camCalWarning = '';
 
 async function scan() {
   $('tapBox').hidden = true; $('scan').disabled = true; result = null;
@@ -589,8 +590,41 @@ async function capturePass(cams, pts, rN, ref, onStep) {
   });
   return { B, Wf, corr };
 }
+async function recalibrateCameras() {
+  const geo = async () => (await fetch('/ad/config/calibration/geometry', { cache: 'no-store' })).json();
+  for (let t = 0; t < 20; t++) {                  // Kameras müssen laufen
+    try { const f = await grabLumCam(0, 1); if (meanLum(f) > 4) break; } catch {}
+    status('Warte auf die Kameras …'); await sleep(1000);
+  }
+  status('Autodarts kalibriert die Kameras … (Scheibe frei lassen)');
+  const res = await new Promise(r => { adCalWaiter = r; send({ type: 'adCalibrate' }); setTimeout(() => { if (adCalWaiter) { adCalWaiter = null; r({ ok: false, status: 'keine Antwort' }); } }, 95000); });
+  if (!res.ok) {
+    // Autodarts behält dann still die alte Kalibrierung. Weitermachen, aber am Ende deutlich warnen.
+    camCalWarning = 'Achtung: Autodarts konnte die Kameras nicht neu kalibrieren (' + (res.body || res.status) + ') – es gilt die alte Kamera-Kalibrierung. Wurden Kameras verstellt, stimmen Erkennung und Beamer nicht; später erneut einrichten.';
+    status(camCalWarning, 'err');
+    await sleep(2500);
+    return;
+  }
+  // erst warten, bis Autodarts wirklich kalibriert (Status „Calibrating“), dann bis es fertig ist
+  let seen = false;
+  for (let t = 0; t < 90; t++) {
+    const g = await geo();
+    const busy = boardStatus === 'Calibrating' || (g.cams || []).some(c => c.calibrating);
+    if (busy) seen = true;
+    if ((seen || t > 12) && !busy && (g.cams || []).length) {
+      const info = g.cams.map((c, i) => `Kam ${i + 1}: ${c.fit_failed ? 'fehlgeschlagen' : c.calibrated ? (c.error_px || 0).toFixed(1) + ' px' : '–'}`).join(', ');
+      if (!g.cams.some(c => c.calibrated && !c.fit_failed)) throw new Error('Autodarts-Kalibrierung fehlgeschlagen (' + info + '). Kameras prüfen: ganzer Doppelring im Bild, scharf, Scheibe leer.');
+      status('Kameras kalibriert – ' + info);
+      await sleep(1500);
+      return;
+    }
+    await sleep(1000);
+  }
+  throw new Error('Autodarts-Kamerakalibrierung dauert zu lange.');
+}
 async function autoSetup() {
   $('auto').disabled = $('scan').disabled = true; $('tapBox').hidden = true; progress(0);
+  camCalWarning = '';
   try {
     // Beamerseite muss da sein (verbindet sich nach einem Bridge-Neustart erst nach ein paar Sekunden neu)
     for (let t = 0; !(await patternOnce(null)); t++) {
@@ -601,6 +635,8 @@ async function autoSetup() {
     const granted = await new Promise(res => { lockWaiter = res; send({ type: 'calBegin' }); setTimeout(() => { if (lockWaiter) { lockWaiter = null; res(true); } }, 3000); });
     if (!granted) { status('Es läuft bereits eine Einrichtung – bitte warten.', 'err'); return; }
     await sleep(4000);                                // Autodarts startet neu, Bridge hält sich bis zum Ende raus
+    // Kameras könnten verstellt sein – Autodarts merkt das beim Start nicht. Deshalb immer neu kalibrieren lassen.
+    await recalibrateCameras();
     const g = await (await fetch('/ad/config/calibration/geometry', { cache: 'no-store' })).json();
     let cams = (g.cams || []).map((c, i) => ({ ...c, i })).filter(c => c.calibrated && c.width && c.homography);
     if (!cams.length) throw new Error('Keine kalibrierte Autodarts-Kamera gefunden – zuerst in Autodarts „Calibrate“.');
@@ -653,7 +689,7 @@ async function autoSetup() {
     send({ type: 'calibMode', on: false });
     await sleep(800);
     send({ type: 'adRestart', why: 'nach Beamer-Einrichtung' });   // neues Referenzbild unter normalem Licht
-    status(`✓ Fertig: Beamer auf die Scheibe eingerichtet (≈ ${mmErr.toFixed(1)} mm), Score angedockt, Autodarts neu gestartet.`, 'ok');
+    status(`✓ Fertig: Beamer auf die Scheibe eingerichtet (≈ ${mmErr.toFixed(1)} mm), Score angedockt, Autodarts neu gestartet.` + (camCalWarning ? ' ' + camCalWarning : ''), camCalWarning ? 'err' : 'ok');
     parent !== window && parent.postMessage({ type: 'setupDone' }, '*');
   } catch (e) {
     await pattern(null);

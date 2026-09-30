@@ -365,6 +365,15 @@ function onClientMsg(sock, m) {
       wsSend(sock, { type: 'calGranted' });
       calQuietUntil = Date.now() + 180000; lastReset = 0; adReset('vor Beamer-Einrichtung'); break;
     case 'calEnd': if (calLock?.sock === sock) calLock = null; calQuietUntil = Date.now() + 3000; break;
+    // Kameras in Autodarts neu kalibrieren (wie „Calibrate“ in der Terminal-App) – nur für den Einrichtungs-Besitzer
+    case 'adCalibrate':
+      if (calLock && calLock.sock !== sock) break;
+      calQuietUntil = Math.max(calQuietUntil, Date.now() + 120000);
+      // Antwort kommt erst, wenn Autodarts fertig ist (200) bzw. es nicht geklappt hat (400 „Auto-calibration failed“)
+      fetch(`${CFG.boardManager}/api/config/calibration/auto`, { method: 'POST', signal: AbortSignal.timeout(90000) })
+        .then(async r => { const body = (await r.text()).slice(0, 200); console.log('[AD] Kamera-Kalibrierung ->', r.status, body); wsSend(sock, { type: 'adCalStarted', ok: r.ok, status: r.status, body }); })
+        .catch(e => wsSend(sock, { type: 'adCalStarted', ok: false, status: e.message }));
+      break;
     // Remote: Einrichtung auf dem Beamer starten (läuft dort, unabhängig vom Handy)
     case 'runSetup':
       if (calLock && Date.now() < calLock.until && !calLock.sock.destroyed) { wsSend(sock, { type: 'setupStatus', msg: 'Einrichtung läuft bereits …' }); break; }
