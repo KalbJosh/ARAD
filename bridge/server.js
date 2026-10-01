@@ -44,6 +44,7 @@ function newGame(o = {}) {
   const start = +(o.start || game?.start || CFG.start || 501);
   const doubleOut = o.doubleOut ?? game?.doubleOut ?? CFG.doubleOut ?? true;
   game = { players, start, doubleOut, scores: players.map(() => start), stats: players.map(() => ({ pts: 0, darts: 0 })), cur: 0, winner: null, legStart: Date.now() };
+  history = [];
   visit = []; visitDone = false; lastResult = null;
   say('Game on!');
 }
@@ -60,8 +61,11 @@ function evalVisit(before, darts) {
   }
   return { bust: false, rest: s };
 }
+let history = [];                                   // Stände vor jeder gewerteten Aufnahme (für „zurück“)
 function commitVisit() {
   if (game.winner === null && visit.length) {
+    history.push({ scores: [...game.scores], stats: game.stats.map(s => ({ ...s })), cur: game.cur, winner: game.winner, lastResult });
+    if (history.length > 50) history.shift();
     const r = evalVisit(game.scores[game.cur], visit);
     const sum = visit.reduce((a, d) => a + pts(d), 0);
     game.stats[game.cur].pts += r.bust ? 0 : sum;
@@ -377,7 +381,7 @@ function snapshot() {
   const pre = game.winner === null ? evalVisit(game.scores[game.cur], visit) : { bust: false, rest: game.scores[game.cur] };
   return {
     type: 'state',
-    game, visit, pre, lastResult, calib, calibMode,
+    game, visit, pre, lastResult, calib, calibMode, canUndo: history.length > 0,
     board: { online: bm.online, source: bm.source, status: bm.status },
     cfg: { fx: CFG.fx, visitEndMs: CFG.visitEndMs, perDartMs: CFG.perDartMs },
   };
@@ -394,6 +398,23 @@ function onClientMsg(sock, m) {
     case 'test': { const err = simulate(m.seg); if (err) wsSend(sock, { type: 'error', msg: err }); break; }
     case 'newGame': newGame(m); push(); break;
     case 'next': visit = []; visitDone = false; game.cur = (game.cur + 1) % game.scores.length; push(); break;
+    // Dart der laufenden Aufnahme korrigieren (Autodarts lag daneben)
+    case 'correctDart': {
+      const i = +m.index, p = parseName(m.seg), miss = /^(MISS|M|0)$/i.test(String(m.seg));
+      if (!(i >= 0 && i < visit.length) || (!p.multiplier && !miss)) break;
+      visit[i] = { ...visit[i], name: miss ? 'Miss' : String(m.seg).toUpperCase(), ...p, bed: null, coords: null, corrected: true };
+      const r = game.winner === null ? evalVisit(game.scores[game.cur], visit) : { bust: false };
+      visitDone = visit.length === 3 || r.bust || r.won;
+      push(); break;
+    }
+    // letzte gewertete Aufnahme zurücknehmen
+    case 'undoVisit': {
+      const h = history.pop();
+      if (!h) break;
+      game.scores = h.scores; game.stats = h.stats; game.cur = h.cur; game.winner = h.winner; lastResult = h.lastResult;
+      visit = []; visitDone = false;
+      push(); break;
+    }
     case 'takeout': commitVisit(); break;   // manuell, falls Autodarts nicht zurücksetzt
     case 'calibMode': calibMode = !!m.on; push(); break;
     case 'calib':

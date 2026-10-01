@@ -2,274 +2,455 @@
 <html lang="de">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1">
-<meta name="theme-color" content="#0d0f12">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,viewport-fit=cover">
+<meta name="theme-color" content="#070a0d">
+<meta name="apple-mobile-web-app-capable" content="yes">
 <title>ARAD Remote</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@600;800&family=Rajdhani:wght@500;600;700&display=swap" rel="stylesheet">
 <style>
-  :root{--bg:#0d0f12;--card:#171a1f;--line:#2a2f37;--fg:#eef1f4;--mute:#8b94a1;--acc:#00e070;--warn:#ff5a5a}
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--fg);font:16px/1.4 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;-webkit-tap-highlight-color:transparent}
-  main{max-width:520px;margin:0 auto;padding:12px 16px 40px}
-  h1{font-size:20px;margin:6px 0 12px;display:flex;justify-content:space-between;align-items:center}
-  #conn{font-size:13px;font-weight:500;color:var(--mute)}
-  #conn.ok{color:var(--acc)} #conn.bad{color:var(--warn)}
-  section{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:14px;margin-bottom:12px}
-  h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--mute);margin:0 0 10px}
-  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center}
-  .row+.row{margin-top:8px}
-  button,select,input[type=text]{font:inherit;color:var(--fg);background:#22272e;border:1px solid var(--line);border-radius:10px;padding:10px 12px;min-height:44px}
-  button{cursor:pointer;touch-action:manipulation}
-  button:active{transform:scale(.97)}
-  button.pri{background:var(--acc);color:#000;border-color:transparent;font-weight:700}
-  button.on{background:#fff;color:#000}
-  input[type=text]{flex:1;min-width:0}
-  input[type=range]{flex:1;accent-color:var(--acc)}
-  label{display:flex;gap:8px;align-items:center}
-  .grid{display:grid;grid-template-columns:repeat(4,1fr);gap:8px}
-  .grid button{padding:10px 0}
-  .score{display:grid;grid-template-columns:1fr auto;gap:4px 12px;font-size:18px}
-  .score .cur{font-weight:800}
-  .score .s{font-variant-numeric:tabular-nums;text-align:right}
-  #visit{margin-top:6px;color:var(--mute)}
-  .pad{display:grid;grid-template-columns:repeat(3,64px);grid-template-rows:repeat(3,64px);gap:6px;justify-content:center;margin:10px auto}
-  .pad button{font-size:22px;padding:0}
-  .seg{display:flex;border:1px solid var(--line);border-radius:10px;overflow:hidden}
-  .seg button{border:0;border-radius:0;flex:1;background:transparent}
-  .seg button.on{background:#fff;color:#000}
-  .hint{font-size:13px;color:var(--mute);margin:8px 0 0}
-  #err{color:var(--warn);font-size:14px;min-height:1em;margin-top:6px}
-  .val{min-width:3.5em;text-align:right;font-variant-numeric:tabular-nums;color:var(--mute)}
+  :root{
+    --bg:#070a0d; --card:#0c1217; --card2:#101820; --line:#16303a; --line2:#1f3f4b;
+    --fg:#e8f8fb; --mute:#7b939b; --dim:#3b5058;
+    --cy:#00e5ff; --mg:#ff2bd6; --am:#ffc400; --red:#ff4560; --ok:#00e070;
+    --disp:"Orbitron","Rajdhani",system-ui,sans-serif; --ui:"Rajdhani",system-ui,-apple-system,sans-serif;
+  }
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;background:var(--bg);color:var(--fg);font:500 17px/1.35 var(--ui)}
+  body{padding-bottom:calc(76px + env(safe-area-inset-bottom))}
+  main{max-width:560px;margin:0 auto;padding:0 14px}
+  button,input,select{font:inherit;color:inherit}
+
+  /* Kopf */
+  header{position:sticky;top:0;z-index:20;background:linear-gradient(var(--bg) 70%,transparent);padding:calc(10px + env(safe-area-inset-top)) 14px 10px}
+  .top{max-width:560px;margin:0 auto;display:flex;align-items:center;justify-content:space-between;gap:10px}
+  .logo{font:800 22px var(--disp);letter-spacing:.3em;color:var(--cy);text-shadow:0 0 14px rgba(0,229,255,.55)}
+  .chips{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}
+  .chip{display:inline-flex;align-items:center;gap:6px;font:700 12px var(--ui);letter-spacing:.14em;text-transform:uppercase;padding:5px 9px;border:1px solid var(--line2);border-radius:999px;color:var(--mute);background:var(--card)}
+  .chip i{width:8px;height:8px;border-radius:50%;background:var(--dim)}
+  .chip.ok i{background:var(--ok);box-shadow:0 0 8px var(--ok)} .chip.warn i{background:var(--am);box-shadow:0 0 8px var(--am)} .chip.bad i{background:var(--red);box-shadow:0 0 8px var(--red)}
+
+  /* Karten */
+  .card{position:relative;background:var(--card);border:1px solid var(--line);border-radius:16px;padding:14px;margin:0 0 12px}
+  .card::before,.card::after{content:'';position:absolute;width:14px;height:14px;border:2px solid var(--cy);opacity:.7}
+  .card::before{left:-1px;top:-1px;border-right:0;border-bottom:0;border-top-left-radius:16px}
+  .card::after{right:-1px;bottom:-1px;border-left:0;border-top:0;border-bottom-right-radius:16px}
+  h2{margin:0 0 10px;font:700 13px var(--ui);letter-spacing:.22em;text-transform:uppercase;color:var(--mute)}
+  .row{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+  .row+.row{margin-top:10px}
+  .grow{flex:1}
+  .hint{font-size:14px;color:var(--mute);margin:8px 0 0}
+
+  /* Knöpfe */
+  .btn{appearance:none;border:1px solid var(--line2);background:var(--card2);border-radius:12px;min-height:46px;padding:8px 14px;font-weight:700;letter-spacing:.04em;cursor:pointer;touch-action:manipulation;transition:transform .08s,background .2s}
+  .btn:active{transform:scale(.97)}
+  .btn:disabled{opacity:.35}
+  .btn.pri{background:var(--cy);color:#001318;border-color:transparent;box-shadow:0 0 18px rgba(0,229,255,.35)}
+  .btn.mg{border-color:var(--mg);color:var(--mg)}
+  .btn.on{background:#e8f8fb;color:#05090c;border-color:transparent}
+  .btn.big{min-height:58px;font-size:19px}
+  .seg{display:flex;background:var(--card2);border:1px solid var(--line2);border-radius:12px;padding:3px;gap:3px}
+  .seg button{flex:1;border:0;background:transparent;border-radius:9px;min-height:40px;font-weight:700;cursor:pointer}
+  .seg button.on{background:var(--cy);color:#001318}
+  input[type=text]{flex:1;min-width:0;background:var(--card2);border:1px solid var(--line2);border-radius:12px;min-height:46px;padding:0 12px;outline:none}
+  input[type=text]:focus{border-color:var(--cy)}
+  input[type=range]{flex:1;accent-color:var(--cy);min-width:0}
+  .val{min-width:4.4em;text-align:right;color:var(--mute);font-variant-numeric:tabular-nums}
+  label.tog{display:flex;align-items:center;gap:10px;cursor:pointer}
+  label.tog input{width:22px;height:22px;accent-color:var(--cy)}
+
+  /* Spielstand */
+  .pl{display:grid;grid-template-columns:1fr auto;align-items:end;padding:8px 10px;border-radius:12px;opacity:.5;transition:all .3s}
+  .pl.cur{opacity:1;background:linear-gradient(90deg,rgba(0,229,255,.12),transparent);box-shadow:inset 3px 0 0 var(--cy)}
+  .pl .n{font:700 20px var(--ui);letter-spacing:.08em;text-transform:uppercase}
+  .pl .a{font-size:13px;color:var(--mute);letter-spacing:.1em}
+  .pl .s{font:800 34px var(--disp);font-variant-numeric:tabular-nums}
+  .pl.cur .s{font-size:46px;color:#fff;text-shadow:0 0 16px rgba(0,229,255,.6)}
+  .pl.won{opacity:1} .pl.won .s{color:#ffd400}
+  .visit{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:12px}
+  .dart{min-height:64px;border-radius:12px;border:2px dashed var(--line2);background:transparent;display:flex;flex-direction:column;align-items:center;justify-content:center;font:800 20px var(--disp);color:var(--dim);cursor:pointer}
+  .dart small{font:700 13px var(--ui);letter-spacing:.12em;opacity:.8;margin-top:2px}
+  .dart.f{border-style:solid;border-color:var(--c);color:var(--c)}
+  .dart.fix small::after{content:' · korr.'}
+  .sumline{display:flex;justify-content:space-between;align-items:center;margin-top:12px;gap:8px;flex-wrap:wrap}
+  .sumline b{font:800 22px var(--disp)}
+  .co{display:flex;gap:5px}
+  .co span{font:800 14px var(--disp);color:var(--mg);border:1.5px solid var(--mg);border-radius:8px;padding:4px 7px}
+  .badge{font:800 15px var(--disp);letter-spacing:.15em;padding:4px 10px;border-radius:8px}
+  .badge.bust{color:var(--red);border:1.5px solid var(--red)}
+  .win{margin-top:12px;text-align:center;font:800 18px var(--disp);letter-spacing:.15em;color:#ffd400;border:1.5px solid #ffd400;border-radius:12px;padding:10px;box-shadow:0 0 18px rgba(255,212,0,.3)}
+  .players{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:10px}
+  .pchip{display:inline-flex;align-items:center;gap:6px;background:var(--card2);border:1px solid var(--line2);border-radius:999px;padding:6px 6px 6px 12px;font-weight:700}
+  .pchip button{border:0;background:var(--line);color:var(--fg);border-radius:50%;width:24px;height:24px;cursor:pointer}
+  .tests{display:grid;grid-template-columns:repeat(4,1fr);gap:8px;margin-top:10px}
+
+  details>summary{list-style:none;cursor:pointer;color:var(--mute);font-weight:700;letter-spacing:.06em;padding:4px 0}
+  details>summary::-webkit-details-marker{display:none}
+  details>summary::before{content:'▸ ';color:var(--cy)}
+  details[open]>summary::before{content:'▾ '}
+
+  /* Einrichtung */
+  .setup-status{display:flex;gap:10px;align-items:flex-start;margin-top:10px;font-size:15px;color:var(--mute);min-height:1.3em}
+  .setup-status.ok{color:var(--ok)} .setup-status.err{color:var(--red)}
+  .spin{width:16px;height:16px;border:2px solid var(--line2);border-top-color:var(--cy);border-radius:50%;animation:sp .8s linear infinite;flex:none;margin-top:2px;display:none}
+  .setup-status.run .spin{display:block}
+  @keyframes sp{to{transform:rotate(360deg)}}
+  .pad{display:grid;grid-template-columns:repeat(3,62px);grid-template-rows:repeat(3,62px);gap:6px;justify-content:center;margin:12px auto}
+  .pad .btn{padding:0;font-size:22px}
+
+  /* Reiter unten */
+  nav{position:fixed;left:0;right:0;bottom:0;z-index:30;background:rgba(7,10,13,.92);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);border-top:1px solid var(--line);padding:6px 10px calc(6px + env(safe-area-inset-bottom))}
+  nav .in{max-width:560px;margin:0 auto;display:grid;grid-template-columns:repeat(3,1fr);gap:6px}
+  nav button{border:0;background:transparent;color:var(--mute);border-radius:12px;padding:8px 4px;font:700 13px var(--ui);letter-spacing:.12em;text-transform:uppercase;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:3px}
+  nav button svg{width:22px;height:22px}
+  nav button.on{color:var(--cy);background:rgba(0,229,255,.08)}
+  .tab{display:none}.tab.on{display:block}
+
+  /* Korrektur-Blatt */
+  .sheet-bg{position:fixed;inset:0;background:rgba(0,0,0,.6);z-index:40;display:none}
+  .sheet{position:fixed;left:0;right:0;bottom:0;z-index:41;background:var(--card);border-top:2px solid var(--cy);border-radius:18px 18px 0 0;padding:16px 14px calc(16px + env(safe-area-inset-bottom));transform:translateY(105%);transition:transform .25s}
+  .sheet.on{transform:none}
+  .sheet .in{max-width:560px;margin:0 auto}
+  .nums{display:grid;grid-template-columns:repeat(5,1fr);gap:6px;margin-top:10px}
+  .toast{position:fixed;left:50%;bottom:calc(86px + env(safe-area-inset-bottom));transform:translateX(-50%);background:var(--red);color:#fff;font-weight:700;padding:10px 14px;border-radius:12px;z-index:50;display:none;max-width:90vw}
 </style>
 </head>
 <body>
+<header><div class="top">
+  <div class="logo">ARAD</div>
+  <div class="chips">
+    <span class="chip" id="chipLink"><i></i><span>Verbinde</span></span>
+    <span class="chip" id="chipAd"><i></i><span>Autodarts</span></span>
+  </div>
+</div></header>
+
 <main>
-  <h1>ARAD <span id="conn">verbinde …</span></h1>
+  <!-- ================= SPIEL ================= -->
+  <section class="tab" id="tab-spiel">
+    <div class="card">
+      <div id="score"></div>
+      <div class="visit" id="visit"></div>
+      <div class="sumline" id="sumline"></div>
+      <div id="winner"></div>
+      <p class="hint" id="corrHint">Dart antippen, um ihn zu korrigieren.</p>
+      <div class="row" style="margin-top:12px">
+        <button class="btn grow" id="next">Nächster Spieler</button>
+        <button class="btn grow" id="takeout">Aufnahme werten</button>
+      </div>
+      <div class="row"><button class="btn grow" id="undo">↶ Letzte Aufnahme zurück</button></div>
+    </div>
 
-  <section>
-    <h2>Spielstand</h2>
-    <div class="score" id="score"></div>
-    <div id="visit"></div>
-    <div class="row" style="margin-top:10px">
-      <button id="next">Nächster Spieler</button>
-      <button id="takeout">Aufnahme beenden</button>
+    <div class="card">
+      <h2>Neues Spiel</h2>
+      <div class="players" id="players"></div>
+      <div class="row">
+        <input type="text" id="newPlayer" placeholder="Spieler hinzufügen" maxlength="16" enterkeyhint="done">
+        <button class="btn" id="addPlayer">＋</button>
+      </div>
+      <div class="row">
+        <div class="seg grow" id="start"><button data-v="301">301</button><button data-v="501">501</button><button data-v="701">701</button></div>
+        <label class="tog"><input type="checkbox" id="do" checked> Double-Out</label>
+      </div>
+      <div class="row"><button class="btn pri big grow" id="newGame">Spiel starten</button></div>
+    </div>
+
+    <div class="card">
+      <details>
+        <summary>Testwürfe (ohne Kameras)</summary>
+        <div class="tests" id="tests"></div>
+      </details>
     </div>
   </section>
 
-  <section>
-    <h2>Neues Spiel</h2>
-    <div class="row"><input type="text" id="players" placeholder="Spieler, mit Komma getrennt"></div>
-    <div class="row">
-      <div class="seg" id="start"><button data-v="301">301</button><button data-v="501">501</button><button data-v="701">701</button></div>
-      <label><input type="checkbox" id="do" checked> Double-Out</label>
+  <!-- ================= BEAMER ================= -->
+  <section class="tab" id="tab-beamer">
+    <div class="card">
+      <h2>Beamer einrichten</h2>
+      <button class="btn pri big" style="width:100%" id="autoSetup">🎯 Automatisch einrichten</button>
+      <div class="setup-status" id="setupStatus"><span class="spin"></span><span id="setupText">Kameras und Beamer werden automatisch auf die Scheibe eingestellt. Scheibe frei lassen, dauert 1–3 Minuten. Läuft am Beamer – das Handy darf ausgehen.</span></div>
     </div>
-    <div class="row"><button class="pri" id="new" style="flex:1">Spiel starten</button></div>
-  </section>
 
-  <section>
-    <h2>Testwurf (ohne Kameras)</h2>
-    <div class="grid" id="tests"></div>
-    <div id="err"></div>
-  </section>
+    <div class="card">
+      <h2>Scoreboard</h2>
+      <div class="row"><div class="seg grow" id="pmode"><button data-v="auto">Oben links (auto)</button><button data-v="manual">Manuell</button></div></div>
+      <div class="row"><span>Größe</span><input type="range" id="pscale" min="0.5" max="2.5" step="0.05"><span class="val" id="pscaleV"></span></div>
+      <div class="row"><span>Schaumstoffring</span><input type="range" id="psur" min="230" max="450" step="5"><span class="val" id="psurV"></span></div>
+      <p class="hint">Auto: Ecke oben links, so groß wie Platz bis zum Ring ist (Größe = Obergrenze).</p>
+    </div>
 
-  <section>
-    <h2>Beamer einrichten</h2>
-    <div class="row"><button class="pri" id="autoSetup" style="flex:1">🎯 Beamer automatisch einrichten</button></div>
-    <div id="setupStatus" class="hint" style="min-height:1.2em"></div>
-    <p class="hint">Läuft am Beamer selbst – das Handy darf dabei ausgehen. Scheibe frei lassen, ca. 40 s. Nötig nur, wenn Beamer oder Scheibe bewegt wurden.</p>
-    <div class="row"><span>Scoreboard</span><div class="seg" id="pmode"><button data-v="auto">Oben links (auto)</button><button data-v="manual">Manuell</button></div></div>
-    <div class="row"><span>Größe</span><input type="range" id="pscale" min="0.5" max="2.5" step="0.05"><span class="val" id="pscaleV"></span></div>
-    <div class="row"><span>Schaumstoffring</span><input type="range" id="psur" min="230" max="450" step="5"><span class="val" id="psurV"></span></div>
-    <p class="hint">Auto: Scoreboard in der Ecke oben links, so groß wie Platz bis zum Schaumstoffring ist (Größe = Obergrenze).</p>
-    <div class="row"><button id="focus" style="flex:1">🔎 Autodarts-Kameras scharfstellen</button></div>
-    <details style="margin-top:10px">
-      <summary class="hint" style="cursor:pointer">Feinjustage von Hand</summary>
-      <div class="row" style="margin-top:8px"><button id="calib" style="flex:1">Gitter anzeigen</button></div>
-      <div id="calibBox" hidden>
-        <p class="hint">Punkt wählen, dann mit dem Steuerkreuz auf die <b>Außenkante des Doppelrings</b> schieben. „Score“ schiebt das Scoreboard (schaltet auf Manuell).</p>
-        <div class="seg" id="handle"><button data-v="0">20</button><button data-v="1">6</button><button data-v="2">3</button><button data-v="3">11</button><button data-v="4">Score</button><button data-v="all">Alle</button></div>
-        <div class="pad">
-          <span></span><button data-d="0,-1">▲</button><span></span>
-          <button data-d="-1,0">◀</button><button id="stepBtn">1</button><button data-d="1,0">▶</button>
-          <span></span><button data-d="0,1">▼</button><span></span>
+    <div class="card">
+      <h2>Werkzeuge</h2>
+      <div class="row">
+        <button class="btn grow" id="focus">🔎 Kameras scharfstellen</button>
+        <button class="btn grow" id="reloadBeamer">⟳ Beamerseite neu laden</button>
+      </div>
+      <div class="row"><button class="btn grow" id="fxTest">Treffer-Animation testen</button></div>
+      <details style="margin-top:12px">
+        <summary>Feinjustage von Hand</summary>
+        <div class="row" style="margin-top:8px"><button class="btn grow" id="calib">Gitter anzeigen</button></div>
+        <div id="calibBox" hidden>
+          <p class="hint">Punkt wählen und mit dem Steuerkreuz auf die <b>Außenkante des Doppelrings</b> schieben. „Score“ schiebt das Scoreboard (schaltet auf Manuell).</p>
+          <div class="row"><div class="seg grow" id="handle"><button data-v="0">20</button><button data-v="1">6</button><button data-v="2">3</button><button data-v="3">11</button><button data-v="4">Score</button><button data-v="all">Alle</button></div></div>
+          <div class="pad">
+            <span></span><button class="btn" data-d="0,-1">▲</button><span></span>
+            <button class="btn" data-d="-1,0">◀</button><button class="btn" id="stepBtn">1</button><button class="btn" data-d="1,0">▶</button>
+            <span></span><button class="btn" data-d="0,1">▼</button><span></span>
+          </div>
+          <p class="hint" style="text-align:center;margin-top:0">Mitte = Schrittweite 1 / 10 / 50 px</p>
+          <div class="row"><button class="btn grow" id="calibReset">Kalibrierung zurücksetzen</button></div>
         </div>
-        <p class="hint" style="text-align:center;margin-top:0">Mitte = Schrittweite (1 / 10 / 50 px)</p>
-        <div class="row" style="margin-top:10px"><button id="calibReset">Zurücksetzen</button></div>
-      </div>
-      <div class="row" style="margin-top:8px"><button id="autoCal" style="flex:1">📷 Kalibrierseite (Handy / einzelne Kamera)</button></div>
-    </details>
-  </section>
-
-  <section>
-    <h2>Scheibenlicht (Beamer)</h2>
-    <div class="row"><button id="lightOn" style="flex:1">Licht an</button><button id="hud" style="flex:1">HUD-Ring</button></div>
-    <div class="row"><span>Helligkeit</span><input type="range" id="level" min="0" max="1" step="0.01"><span class="val" id="levelV"></span></div>
-    <div class="row"><span>Radius</span><input type="range" id="radius" min="170" max="260" step="1"><span class="val" id="radiusV"></span></div>
-    <div class="row">
-      <div class="seg" id="color" style="flex:1">
-        <button data-v="#ffffff">Neutral</button><button data-v="#fff1dc">Warm</button><button data-v="#e8f0ff">Kalt</button>
-      </div>
+        <div class="row" style="margin-top:10px"><button class="btn grow" id="autoCal">📷 Kalibrierseite (Handy-Kamera)</button></div>
+      </details>
     </div>
-    <p class="hint">Radius 226 mm = Außenkante der Scheibe (Zahlenring). Kleiner = Surround bleibt dunkler. HUD-Ring = animierte Skala außen um die Scheibe.</p>
   </section>
 
-  <section>
-    <h2>Ton (am Beamer)</h2>
-    <div class="row"><button id="caller" style="flex:1">Caller</button><button id="sfx" style="flex:1">Effekte</button></div>
-    <div class="row"><span>Lautstärke</span><input type="range" id="vol" min="0" max="1" step="0.01"><span class="val" id="volV"></span></div>
-    <div class="row"><button id="say180" style="flex:1">„180“ ansagen</button><button id="sayReq" style="flex:1">„You require“</button></div>
-    <p class="hint">Der Browser am Beamer gibt Ton erst frei, nachdem dort einmal eine Taste gedrückt wurde (OK auf der Fernbedienung).</p>
-  </section>
-
-  <section>
-    <h2>Effekt testen</h2>
-    <div class="row"><button id="fxTest" style="flex:1">T20-Animation zeigen</button></div>
+  <!-- ================= LICHT & TON ================= -->
+  <section class="tab" id="tab-licht">
+    <div class="card">
+      <h2>Scheibenlicht</h2>
+      <div class="row"><button class="btn grow" id="lightOn">Licht</button><button class="btn grow" id="hud">HUD-Ring</button></div>
+      <div class="row"><span>Helligkeit</span><input type="range" id="level" min="0" max="1" step="0.01"><span class="val" id="levelV"></span></div>
+      <div class="row"><span>Radius</span><input type="range" id="radius" min="170" max="260" step="1"><span class="val" id="radiusV"></span></div>
+      <div class="row"><div class="seg grow" id="color"><button data-v="#ffffff">Neutral</button><button data-v="#fff1dc">Warm</button><button data-v="#e8f0ff">Kalt</button></div></div>
+      <p class="hint">226 mm = Außenkante der Scheibe. HUD-Ring = Skala um die Scheibe (dreht sich nur während der Show).</p>
+    </div>
+    <div class="card">
+      <h2>Ton am Beamer</h2>
+      <div class="row"><button class="btn grow" id="caller">Caller</button><button class="btn grow" id="sfx">Effekte</button></div>
+      <div class="row"><span>Lautstärke</span><input type="range" id="vol" min="0" max="1" step="0.01"><span class="val" id="volV"></span></div>
+      <div class="row"><button class="btn grow mg" id="say180">„180“ ansagen</button><button class="btn grow mg" id="sayReq">„You require“</button></div>
+      <p class="hint">Der Beamer-Browser gibt Ton erst frei, nachdem dort einmal OK gedrückt wurde.</p>
+    </div>
   </section>
 </main>
+
+<nav><div class="in">
+  <button data-tab="spiel"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/></svg>Spiel</button>
+  <button data-tab="beamer"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="7" width="18" height="10" rx="2"/><circle cx="15" cy="12" r="2.5"/><path d="M6 17v2M18 17v2"/></svg>Beamer</button>
+  <button data-tab="licht"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M9 18h6M10 21h4"/><path d="M12 3a6 6 0 0 0-3.5 10.9c.6.5 1 1.3 1 2.1h5c0-.8.4-1.6 1-2.1A6 6 0 0 0 12 3z"/></svg>Licht &amp; Ton</button>
+</div></nav>
+
+<div class="sheet-bg" id="sheetBg"></div>
+<div class="sheet" id="sheet"><div class="in">
+  <h2 id="sheetTitle">Dart korrigieren</h2>
+  <div class="seg" id="mult"><button data-v="S" class="on">Single</button><button data-v="D">Double</button><button data-v="T">Triple</button></div>
+  <div class="nums" id="nums"></div>
+  <div class="row" style="margin-top:8px">
+    <button class="btn grow" data-seg="25">25</button><button class="btn grow" data-seg="BULL">Bull</button><button class="btn grow" data-seg="MISS">Miss</button>
+  </div>
+  <div class="row"><button class="btn grow" id="sheetClose">Abbrechen</button></div>
+</div></div>
+<div class="toast" id="toast"></div>
 
 <script>
 const $ = id => document.getElementById(id);
 const WS_URL = location.origin.replace(/^http/, 'ws') + '/ws';
+const DART_COL = ['#00e5ff', '#ff2bd6', '#ffc400'];
+const AD_TEXT = { Throw: 'Bereit', Takeout: 'Darts ziehen', 'Takeout in progress': 'Darts ziehen', Starting: 'Startet', Stopped: 'Standby', Calibrating: 'Kalibriert', Error: 'Fehler' };
 let ws, st = null, calib = null, backoff = 500;
-let sel = 0, step = 1, startVal = 501;
+let sel = 0, step = 1, startVal = 0, players = null, corrIdx = -1, mult = 'S';
+const store = { get: k => { try { return localStorage.getItem(k); } catch { return null; } }, set: (k, v) => { try { localStorage.setItem(k, v); } catch {} } };
 
-function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); }
+function send(m) { if (ws && ws.readyState === 1) ws.send(JSON.stringify(m)); else toast('Keine Verbindung zur Bridge'); }
+function toast(t) { $('toast').textContent = t; $('toast').style.display = 'block'; clearTimeout(toast.t); toast.t = setTimeout(() => $('toast').style.display = 'none', 2600); }
+function chip(id, cls, text) { $(id).className = 'chip ' + cls; $(id).lastElementChild.textContent = text; }
 function connect() {
   ws = new WebSocket(WS_URL);
-  ws.onopen = () => { backoff = 500; $('conn').textContent = 'verbunden'; $('conn').className = 'ok'; };
-  ws.onclose = () => {
-    $('conn').textContent = 'getrennt'; $('conn').className = 'bad';
-    setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 5000);
-  };
+  ws.onopen = () => { backoff = 500; chip('chipLink', 'ok', 'Verbunden'); };
+  ws.onclose = () => { chip('chipLink', 'bad', 'Getrennt'); setTimeout(connect, backoff); backoff = Math.min(backoff * 2, 5000); };
   ws.onmessage = e => {
     const m = JSON.parse(e.data);
     if (m.type === 'state') { st = m; calib = m.calib; render(); }
     else if (m.type === 'calib') { calib = m.calib; renderCalib(); }
-    else if (m.type === 'setupStatus') { $('setupStatus').textContent = m.msg; $('setupStatus').style.color = m.cls === 'err' ? 'var(--warn)' : m.cls === 'ok' ? 'var(--acc)' : ''; }
-    else if (m.type === 'error') { $('err').textContent = m.msg; setTimeout(() => $('err').textContent = '', 2500); }
+    else if (m.type === 'error') toast(m.msg);
+    else if (m.type === 'setupStatus') setupStatus(m.msg, m.cls);
   };
 }
 
-const label = d => !d.multiplier ? 'Miss' : d.number === 25 ? (d.multiplier === 2 ? 'Bull' : '25') : 'SDT'[d.multiplier - 1] + d.number;
+// ---------- Reiter ----------
+function showTab(t) {
+  document.querySelectorAll('.tab').forEach(x => x.classList.toggle('on', x.id === 'tab-' + t));
+  document.querySelectorAll('nav button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  store.set('arad.tab', t); scrollTo(0, 0);
+}
+document.querySelectorAll('nav button').forEach(b => b.onclick = () => showTab(b.dataset.tab));
+showTab(['spiel', 'beamer', 'licht'].includes(store.get('arad.tab')) ? store.get('arad.tab') : 'spiel');
+
+// ---------- Hilfen ----------
 const esc = s => String(s).replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]));
-let playersTouched = false;
+const label = d => !d.multiplier ? 'MISS' : d.number === 25 ? (d.multiplier === 2 ? 'BULL' : '25') : 'SDT'[d.multiplier - 1] + d.number;
+const pts = d => (d?.number || 0) * (d?.multiplier || 0);
+const DOUBLES = [20,16,8,18,12,10,4,6,14,2,19,17,15,13,11,9,7,5,3,1].map(n => ({ n: 'D' + n, v: n * 2 })).concat([{ n: 'BULL', v: 50 }]);
+const SETUP = [];
+for (let n = 20; n >= 1; n--) SETUP.push({ n: 'T' + n, v: n * 3, c: 3 });
+for (let n = 20; n >= 1; n--) SETUP.push({ n: 'S' + n, v: n, c: 0 });
+SETUP.push({ n: '25', v: 25, c: 2 }, { n: 'BULL', v: 50, c: 4 });
+function checkout(rest, darts) {
+  if (rest > 170 || rest < 2) return null;
+  let best = null;
+  const consider = (route, cost) => { if (!best || cost < best.cost) best = { route, cost }; };
+  DOUBLES.forEach((d, di) => {
+    if (d.v === rest) consider([d.n], 100 + di);
+    if (darts >= 2) SETUP.forEach(a => {
+      if (a.v + d.v === rest) consider([a.n, d.n], 200 + a.c + di);
+      if (darts >= 3) SETUP.forEach(b => { if (a.v + b.v + d.v === rest && a.v >= b.v) consider([a.n, b.n, d.n], 300 + a.c + b.c + di); });
+    });
+  });
+  return best?.route || null;
+}
+
+// ---------- Spiel ----------
 function render() {
-  const g = st.game;
-  $('score').innerHTML = g.players.map((n, i) =>
-    `<span class="${i === g.cur ? 'cur' : ''}">${i === g.cur ? '▶ ' : ''}${esc(n)}${g.winner === i ? ' 🎯' : ''}</span><span class="s ${i === g.cur ? 'cur' : ''}">${g.scores[i]}</span>`).join('');
-  const b = st.board;
-  $('visit').textContent = (st.visit.length ? st.visit.map(label).join(' · ') + '  ' : '') +
-    `(${b.online ? 'Autodarts ' + (b.status || '–') : 'Autodarts nicht erreichbar'})`;
-  if (!playersTouched) $('players').value = g.players.join(', ');
-  startVal = g.start;
+  const g = st.game, b = st.board;
+  chip('chipAd', b.online ? (b.status === 'Throw' ? 'ok' : b.status === 'Error' ? 'bad' : 'warn') : 'bad', b.online ? (AD_TEXT[b.status] || b.status || 'Autodarts') : 'Autodarts aus');
+  const live = i => i === g.cur && g.winner === null && st.visit.length && !st.pre.bust ? st.pre.rest : g.scores[i];
+  $('score').innerHTML = g.players.map((n, i) => {
+    const s = g.stats?.[i], avg = s && s.darts ? (s.pts / s.darts * 3).toFixed(1) : '–';
+    return `<div class="pl ${i === g.cur && g.winner === null ? 'cur' : ''} ${g.winner === i ? 'won' : ''}"><div><div class="n">${esc(n)}</div><div class="a">Ø ${avg}</div></div><div class="s">${live(i)}</div></div>`;
+  }).join('');
+  $('visit').innerHTML = [0, 1, 2].map(i => {
+    const d = st.visit[i];
+    return d ? `<button class="dart f ${d.corrected ? 'fix' : ''}" data-i="${i}" style="--c:${DART_COL[i]}">${label(d)}<small>+${pts(d)}</small></button>`
+             : `<button class="dart" disabled>0${i + 1}</button>`;
+  }).join('');
+  const sum = st.visit.reduce((a, d) => a + pts(d), 0), left = 3 - st.visit.length;
+  const co = g.doubleOut && g.winner === null && !st.pre.bust && left > 0 ? checkout(st.pre.rest, left) : null;
+  $('sumline').innerHTML = `<span>Aufnahme <b>${sum}</b></span>` +
+    (st.pre.bust ? '<span class="badge bust">BUST</span>' : co ? `<span class="co">${co.map(x => `<span>${x}</span>`).join('')}</span>` : '');
+  $('winner').innerHTML = g.winner !== null ? `<div class="win">🎯 ${esc(g.players[g.winner]).toUpperCase()} GEWINNT</div>` : '';
+  $('corrHint').style.display = st.visit.length ? '' : 'none';
+  $('undo').disabled = !st.canUndo;
+  if (!players) { players = [...g.players]; renderPlayers(); }
+  if (!startVal) { startVal = g.start; $('do').checked = g.doubleOut; }
   [...$('start').children].forEach(x => x.classList.toggle('on', +x.dataset.v === startVal));
-  $('do').checked = g.doubleOut;
   $('calib').textContent = st.calibMode ? 'Gitter ausblenden (fertig)' : 'Gitter anzeigen';
   $('calib').classList.toggle('on', st.calibMode);
   $('calibBox').hidden = !st.calibMode;
   renderCalib();
 }
-function renderCalib() {
-  if (!calib) return;
-  const L = calib.light;
-  $('lightOn').textContent = L.on ? 'Licht an' : 'Licht aus';
-  const So = calib.sound || {};
-  $('caller').classList.toggle('on', So.caller !== false);
-  $('sfx').classList.toggle('on', So.sfx !== false);
-  if (document.activeElement !== $('vol')) $('vol').value = So.volume ?? 0.9;
-  $('volV').textContent = Math.round((So.volume ?? 0.9) * 100) + ' %';
-  $('lightOn').classList.toggle('on', L.on);
-  $('hud').classList.toggle('on', L.hud !== false);
-  if (document.activeElement !== $('level')) $('level').value = L.level;
-  if (document.activeElement !== $('radius')) $('radius').value = L.radiusMm;
-  if (document.activeElement !== $('pscale')) $('pscale').value = calib.panel.scale;
-  const pa = calib.panel.auto !== false;
-  [...$('pmode').children].forEach(x => x.classList.toggle('on', x.dataset.v === (pa ? 'auto' : 'manual')));
-  if (document.activeElement !== $('psur')) $('psur').value = calib.panel.surroundMm ?? 360;
-  $('psurV').textContent = 'Ø ' + Math.round((calib.panel.surroundMm ?? 360) * 2 / 10) + ' cm';
-  $('levelV').textContent = Math.round(L.level * 100) + ' %';
-  $('radiusV').textContent = L.radiusMm + ' mm';
-  $('pscaleV').textContent = (+calib.panel.scale).toFixed(2) + '×';
-  [...$('color').children].forEach(x => x.classList.toggle('on', x.dataset.v === L.color));
-  [...$('handle').children].forEach(x => x.classList.toggle('on', x.dataset.v === String(sel)));
-}
-function pushCalib() { send({ type: 'calib', calib, from: 'remote' }); renderCalib(); }
-
-// Spiel
+$('visit').onclick = e => { const b = e.target.closest('.dart.f'); if (b) openSheet(+b.dataset.i); };
 $('next').onclick = () => send({ type: 'next' });
 $('takeout').onclick = () => send({ type: 'takeout' });
-$('players').oninput = () => { playersTouched = true; };
+$('undo').onclick = () => { if (confirm('Letzte Aufnahme zurücknehmen?')) send({ type: 'undoVisit' }); };
+
+function renderPlayers() {
+  $('players').innerHTML = players.map((p, i) => `<span class="pchip">${esc(p)}<button data-i="${i}" aria-label="${esc(p)} entfernen">✕</button></span>`).join('');
+}
+$('players').onclick = e => { const b = e.target.closest('button'); if (!b) return; players.splice(+b.dataset.i, 1); renderPlayers(); };
+function addPlayer() {
+  const v = $('newPlayer').value.trim(); if (!v) return;
+  if (players.length >= 6) return toast('Höchstens 6 Spieler');
+  players.push(v); $('newPlayer').value = ''; renderPlayers();
+}
+$('addPlayer').onclick = addPlayer;
+$('newPlayer').onkeydown = e => { if (e.key === 'Enter') addPlayer(); };
 $('start').onclick = e => { if (e.target.dataset.v) { startVal = +e.target.dataset.v; [...$('start').children].forEach(x => x.classList.toggle('on', x === e.target)); } };
-$('new').onclick = () => {
-  const players = $('players').value.split(',').map(s => s.trim()).filter(Boolean);
+$('newGame').onclick = () => {
+  if (!players.length) return toast('Mindestens ein Spieler');
   send({ type: 'newGame', players, start: startVal, doubleOut: $('do').checked });
-  playersTouched = false;
 };
 
 // Testwürfe
-['T20','S20','D20','T19','D16','D8','S1','S5','25','BULL','MISS','?'].forEach(s => {
-  const b = document.createElement('button');
-  b.textContent = s === '?' ? 'Zufall' : s;
+['T20', 'S20', 'D20', 'T19', 'D16', 'D8', 'S1', 'S5', '25', 'BULL', 'MISS', '?'].forEach(s => {
+  const b = document.createElement('button'); b.className = 'btn'; b.textContent = s === '?' ? 'Zufall' : s;
   b.onclick = () => send({ type: 'test', seg: s === '?' ? rnd() : s });
   $('tests').append(b);
 });
-function rnd() {
-  const r = Math.random();
-  if (r < 0.05) return 'BULL';
-  if (r < 0.1) return '25';
-  return ['S','S','S','D','T'][Math.floor(Math.random() * 5)] + (1 + Math.floor(Math.random() * 20));
-}
+function rnd() { const r = Math.random(); if (r < 0.05) return 'BULL'; if (r < 0.1) return '25'; return ['S', 'S', 'S', 'D', 'T'][Math.floor(Math.random() * 5)] + (1 + Math.floor(Math.random() * 20)); }
 
-// Kalibrierung
-$('calib').onclick = () => send({ type: 'calibMode', on: !st?.calibMode });
+// ---------- Korrektur ----------
+for (let n = 1; n <= 20; n++) { const b = document.createElement('button'); b.className = 'btn'; b.textContent = n; b.dataset.n = n; $('nums').append(b); }
+function openSheet(i) {
+  corrIdx = i; mult = 'S';
+  [...$('mult').children].forEach(x => x.classList.toggle('on', x.dataset.v === mult));
+  $('sheetTitle').textContent = `Dart ${i + 1} korrigieren (erkannt: ${label(st.visit[i])})`;
+  $('sheet').classList.add('on'); $('sheetBg').style.display = 'block';
+}
+function closeSheet() { $('sheet').classList.remove('on'); $('sheetBg').style.display = 'none'; corrIdx = -1; }
+$('sheetBg').onclick = closeSheet; $('sheetClose').onclick = closeSheet;
+$('mult').onclick = e => { if (e.target.dataset.v) { mult = e.target.dataset.v; [...$('mult').children].forEach(x => x.classList.toggle('on', x === e.target)); } };
+$('nums').onclick = e => { const n = e.target.dataset.n; if (n && corrIdx >= 0) { send({ type: 'correctDart', index: corrIdx, seg: mult + n }); closeSheet(); } };
+document.querySelectorAll('[data-seg]').forEach(b => b.onclick = () => { if (corrIdx >= 0) { send({ type: 'correctDart', index: corrIdx, seg: b.dataset.seg }); closeSheet(); } });
+
+// ---------- Beamer ----------
+function setupStatus(msg, cls) {
+  const done = /✓ Fertig|Nur |antwortet nicht|bereits|nicht einrichtbar|keine Kamera|lange|Schreiben fehlgeschlagen/.test(msg) || cls === 'err';
+  $('setupStatus').className = 'setup-status ' + (cls === 'err' ? 'err' : /✓ Fertig/.test(msg) ? 'ok' : done ? '' : 'run');
+  $('setupText').textContent = msg;
+  $('autoSetup').disabled = !done;
+}
+$('autoSetup').onclick = () => { send({ type: 'runSetup' }); setupStatus('Auftrag an den Beamer geschickt …'); };
 $('focus').onclick = () => { location.href = '/focus'; };
-$('autoSetup').onclick = () => { send({ type: 'runSetup' }); $('setupStatus').textContent = 'Auftrag an den Beamer geschickt …'; };
+$('reloadBeamer').onclick = () => { send({ type: 'reloadBeamer' }); toast('Beamerseite wird neu geladen'); };
+$('fxTest').onclick = () => send({ type: 'fxTest', seg: 'T20' });
 $('autoCal').onclick = () => { location.href = `https://${location.hostname}:8443/calib`; };
+$('calib').onclick = () => send({ type: 'calibMode', on: !st?.calibMode });
+$('calibReset').onclick = () => { if (confirm('Kalibrierung wirklich zurücksetzen?')) send({ type: 'calibReset' }); };
 $('handle').onclick = e => { const v = e.target.dataset.v; if (v !== undefined) { sel = v === 'all' ? 'all' : +v; renderCalib(); } };
 $('stepBtn').onclick = () => { step = step === 1 ? 10 : step === 10 ? 50 : 1; $('stepBtn').textContent = step; };
-const REF_W = 1920, REF_H = 1080;   // Schritt in Beamer-Pixeln (L1: 1080p)
+const REF_W = 1920, REF_H = 1080;   // Schrittweite in Beamer-Pixeln
 function nudge(dx, dy) {
   if (!calib) return;
-  const mx = dx * step / REF_W, my = dy * step / REF_H;
-  const mv = p => [p[0] + mx, p[1] + my];
-  if (sel === 'all') { calib.pts = calib.pts.map(mv); }
+  const mx = dx * step / REF_W, my = dy * step / REF_H, mv = p => [p[0] + mx, p[1] + my];
+  if (sel === 'all') calib.pts = calib.pts.map(mv);
   else if (sel === 4) {
     if (calib.panel.auto !== false) { calib.panel.auto = false; calib.panel.x = 0.01; calib.panel.y = 0.01; }
     calib.panel.x += mx; calib.panel.y += my;
-  }
-  else calib.pts[sel] = mv(calib.pts[sel]);
+  } else calib.pts[sel] = mv(calib.pts[sel]);
   pushCalib();
 }
-// Gedrückt halten = wiederholen
 document.querySelectorAll('.pad [data-d]').forEach(b => {
-  const [dx, dy] = b.dataset.d.split(',').map(Number);
-  let t1, t2;
+  const [dx, dy] = b.dataset.d.split(',').map(Number); let t1, t2;
   const stop = () => { clearTimeout(t1); clearInterval(t2); };
   b.addEventListener('pointerdown', e => { e.preventDefault(); nudge(dx, dy); t1 = setTimeout(() => { t2 = setInterval(() => nudge(dx, dy), 60); }, 350); });
   ['pointerup', 'pointerleave', 'pointercancel'].forEach(ev => b.addEventListener(ev, stop));
 });
-$('pscale').oninput = e => { calib.panel.scale = +e.target.value; pushCalib(); };
 $('pmode').onclick = e => {
-  const v = e.target.dataset.v; if (!v) return;
+  const v = e.target.dataset.v; if (!v || !calib) return;
   if (v === 'auto') calib.panel.auto = true;
   else if (calib.panel.auto !== false) { calib.panel.auto = false; calib.panel.x = 0.01; calib.panel.y = 0.01; }
   pushCalib();
 };
+$('pscale').oninput = e => { calib.panel.scale = +e.target.value; pushCalib(); };
 $('psur').oninput = e => { calib.panel.surroundMm = +e.target.value; pushCalib(); };
-$('calibReset').onclick = () => { if (confirm('Kalibrierung wirklich zurücksetzen?')) send({ type: 'calibReset' }); };
 
-// Licht
+// ---------- Licht & Ton ----------
 $('lightOn').onclick = () => { calib.light.on = !calib.light.on; pushCalib(); };
 $('hud').onclick = () => { calib.light.hud = calib.light.hud === false; pushCalib(); };
 $('level').oninput = e => { calib.light.level = +e.target.value; pushCalib(); };
 $('radius').oninput = e => { calib.light.radiusMm = +e.target.value; pushCalib(); };
 $('color').onclick = e => { if (e.target.dataset.v) { calib.light.color = e.target.dataset.v; pushCalib(); } };
-$('fxTest').onclick = () => send({ type: 'fxTest', seg: 'T20' });
 const setSound = o => { calib.sound = { ...calib.sound, ...o }; pushCalib(); };
 $('caller').onclick = () => setSound({ caller: calib.sound?.caller === false });
 $('sfx').onclick = () => setSound({ sfx: calib.sound?.sfx === false });
 $('vol').oninput = e => setSound({ volume: +e.target.value });
 $('say180').onclick = () => send({ type: 'say', text: 'One hundred and eighty!' });
-$('sayReq').onclick = () => { const g = st?.game; send({ type: 'say', text: `${g ? g.players[g.cur] : 'Josh'}, you require one hundred and twenty-one.` }); };
+$('sayReq').onclick = () => { const g = st?.game; send({ type: 'say', text: `${g ? g.players[g.cur] : 'Player'}, you require one hundred and twenty-one.` }); };
+
+function pushCalib() { send({ type: 'calib', calib, from: 'remote' }); renderCalib(); }
+function renderCalib() {
+  if (!calib) return;
+  const L = calib.light, So = calib.sound || {}, P = calib.panel;
+  $('lightOn').textContent = L.on ? 'Licht an' : 'Licht aus'; $('lightOn').classList.toggle('on', L.on);
+  $('hud').classList.toggle('on', L.hud !== false);
+  const active = document.activeElement;
+  if (active !== $('level')) $('level').value = L.level;
+  if (active !== $('radius')) $('radius').value = L.radiusMm;
+  if (active !== $('pscale')) $('pscale').value = P.scale;
+  if (active !== $('psur')) $('psur').value = P.surroundMm ?? 360;
+  if (active !== $('vol')) $('vol').value = So.volume ?? 0.9;
+  $('levelV').textContent = Math.round(L.level * 100) + ' %';
+  $('radiusV').textContent = L.radiusMm + ' mm';
+  $('pscaleV').textContent = (+P.scale).toFixed(2) + '×';
+  $('psurV').textContent = 'Ø ' + Math.round((P.surroundMm ?? 360) * 2 / 10) + ' cm';
+  $('volV').textContent = Math.round((So.volume ?? 0.9) * 100) + ' %';
+  [...$('color').children].forEach(x => x.classList.toggle('on', x.dataset.v === L.color));
+  [...$('pmode').children].forEach(x => x.classList.toggle('on', x.dataset.v === (P.auto !== false ? 'auto' : 'manual')));
+  [...$('handle').children].forEach(x => x.classList.toggle('on', x.dataset.v === String(sel)));
+  $('caller').classList.toggle('on', So.caller !== false);
+  $('sfx').classList.toggle('on', So.sfx !== false);
+}
 
 connect();
 </script>
