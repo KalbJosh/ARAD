@@ -198,6 +198,61 @@ function onDart(d) {
 // ================= Autodarts =================
 // Lichtwechsel auf der Scheibe (Seite neu geladen, Kalibriermuster, Show) hält Autodarts für eine Hand
 // und bleibt dann im „Takeout“ hängen. Ist dabei kein Dart gezählt, ist die Scheibe leer -> Reset ist sicher.
+// Autodarts-Dienst komplett neu starten: nur so lädt er eine geänderte calibration.json (Board-Stop/Start reicht nicht)
+function adServiceRestart() {
+  return new Promise(res => {
+    const p = spawn('systemctl', ['--user', 'restart', CFG.adService || 'autodarts'], { stdio: 'ignore' });
+    p.on('exit', code => { console.log('[AD] Dienst neu gestartet ->', code); setTimeout(() => res(code === 0), 4000); });
+    p.on('error', () => res(false));
+  });
+}
+
+// Autodarts-Kamerakalibrierung mit Netz und doppeltem Boden
+const AD_CAL_FILE = home(CFG.adCalibrationFile || '~/.config/autodarts/calibration.json');
+async function adCalibrateSafe() {
+  let backup = null;
+  try { backup = fs.readFileSync(AD_CAL_FILE); } catch {}
+  let res;
+  try {
+    const r = await fetch(`${CFG.boardManager}/api/config/calibration/auto`, { method: 'POST', signal: AbortSignal.timeout(90000) });
+    res = { ok: r.ok, status: r.status, body: (await r.text()).slice(0, 200) };
+  } catch (e) { res = { ok: false, status: e.message }; }
+  console.log('[AD] Kamera-Kalibrierung ->', res.status, res.body || '');
+  if (!res.ok && backup) {
+    // alte Kalibrierung zurück: Datei zurückschreiben, Dienst neu starten (lädt die Datei)
+    try { fs.writeFileSync(AD_CAL_FILE, backup); res.restored = true; } catch (e) { console.warn('[AD] Zurückspielen fehlgeschlagen:', e.message); }
+    await adServiceRestart();
+    console.log('[AD] alte Kamera-Kalibrierung zurückgespielt');
+  }
+  return res;
+}
+
+// Eigene Kamera-Kalibrierung in die Autodarts-Datei schreiben (Sicherung davor). cams: [{ index, homography[9], undistorted[9], error }]
+async function adWriteCalibration(cams) {
+  try {
+    const toml = fs.readFileSync(home(CFG.adConfigFile || '~/.config/autodarts/config.toml'), 'utf8');
+    const devs = [...toml.matchAll(/'(native=[^']*)'/g)].map(m => m[1]);       // Reihenfolge = Kamera-Index
+    const cal = JSON.parse(fs.readFileSync(AD_CAL_FILE, 'utf8'));
+    fs.copyFileSync(AD_CAL_FILE, AD_CAL_FILE + '.bak-' + new Date().toISOString().replace(/[:.]/g, '-'));
+    let n = 0;
+    for (const c of cams || []) {
+      const key = (devs[c.index] || '').replace(/^native=[^&]*&/, '');
+      const byRes = cal.cameras?.[key];
+      if (!byRes) continue;
+      const entry = byRes['1280x720'] || byRes[Object.keys(byRes)[0]];
+      if (!entry || c.homography?.length !== 9) continue;
+      entry.homography = c.homography;
+      if (entry.undistorted && c.undistorted?.length === 9) { entry.undistorted.homography = c.undistorted; entry.undistorted.error = c.error ?? entry.undistorted.error; }
+      n++;
+    }
+    if (!n) return { ok: false, status: 'keine passende Kamera in der Autodarts-Datei' };
+    fs.writeFileSync(AD_CAL_FILE, JSON.stringify(cal, null, 2));
+    await adServiceRestart();                                   // nur ein Dienst-Neustart lädt die Datei
+    console.log(`[AD] eigene Kamera-Kalibrierung geschrieben (${n} Kamera${n > 1 ? 's' : ''})`);
+    return { ok: true, written: n };
+  } catch (e) { return { ok: false, status: e.message }; }
+}
+
 // „Reset“ in Autodarts setzt nur den Zähler zurück; das Referenzbild der leeren Scheibe bleibt alt.
 // Stop + Start nimmt ein neues Referenzbild unter dem aktuellen Licht auf.
 let lastReset = 0, stuckSince = 0, calQuietUntil = 0;   // während Kalibrierung nicht eingreifen
@@ -213,7 +268,13 @@ async function adReset(why) {
     console.log(`[AD] Neu gestartet (${why}) -> ${r.status}`);
   } catch (e) { console.warn('[AD] Neustart fehlgeschlagen:', e.message); }
 }
+let errorSince = 0;
 setInterval(() => {
+  // Fehlerzustand (z. B. nach gescheiterter Kalibrierung): Autodarts zählt dann nicht -> neu starten
+  if (bm.status === 'Error' && Date.now() > calQuietUntil) {
+    if (!errorSince) errorSince = Date.now();
+    if (Date.now() - errorSince > 5000) { errorSince = 0; adReset('Fehlerzustand'); }
+  } else errorSince = 0;
   const takeout = /^Takeout/.test(bm.status || '') && Date.now() > fxUntil && Date.now() > calQuietUntil && !calibMode;
   if (!takeout) { stuckSince = 0; return; }
   if (!stuckSince) stuckSince = Date.now();
@@ -361,18 +422,21 @@ function onClientMsg(sock, m) {
     // Einrichtung beginnt: Sperre holen, Autodarts sauber neu starten, danach bis zum Ende nicht eingreifen
     case 'calBegin':
       if (calLock && calLock.sock !== sock && Date.now() < calLock.until && !calLock.sock.destroyed) { wsSend(sock, { type: 'calBusy' }); break; }
-      calLock = { sock, until: Date.now() + 180000 };
+      calLock = { sock, until: Date.now() + 300000 };
       wsSend(sock, { type: 'calGranted' });
-      calQuietUntil = Date.now() + 180000; lastReset = 0; adReset('vor Beamer-Einrichtung'); break;
+      calQuietUntil = Date.now() + 300000; lastReset = 0; adReset('vor Beamer-Einrichtung'); break;
     case 'calEnd': if (calLock?.sock === sock) calLock = null; calQuietUntil = Date.now() + 3000; break;
+    case 'adWriteCalibration':
+      if (calLock && calLock.sock !== sock) break;
+      adWriteCalibration(m.cams).then(res => wsSend(sock, { type: 'adCalWritten', ...res }));
+      break;
     // Kameras in Autodarts neu kalibrieren (wie „Calibrate“ in der Terminal-App) – nur für den Einrichtungs-Besitzer
     case 'adCalibrate':
       if (calLock && calLock.sock !== sock) break;
       calQuietUntil = Math.max(calQuietUntil, Date.now() + 120000);
-      // Antwort kommt erst, wenn Autodarts fertig ist (200) bzw. es nicht geklappt hat (400 „Auto-calibration failed“)
-      fetch(`${CFG.boardManager}/api/config/calibration/auto`, { method: 'POST', signal: AbortSignal.timeout(90000) })
-        .then(async r => { const body = (await r.text()).slice(0, 200); console.log('[AD] Kamera-Kalibrierung ->', r.status, body); wsSend(sock, { type: 'adCalStarted', ok: r.ok, status: r.status, body }); })
-        .catch(e => wsSend(sock, { type: 'adCalStarted', ok: false, status: e.message }));
+      // Antwort kommt erst, wenn Autodarts fertig ist (200) bzw. es nicht geklappt hat (400 „Auto-calibration failed“).
+      // Ein Fehlschlag löscht in Autodarts die bisherige Kalibrierung -> vorher sichern, danach ggf. zurückspielen.
+      adCalibrateSafe().then(res => wsSend(sock, { type: 'adCalStarted', ...res }));
       break;
     // Remote: Einrichtung auf dem Beamer starten (läuft dort, unabhängig vom Handy)
     case 'runSetup':

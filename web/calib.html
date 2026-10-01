@@ -108,7 +108,7 @@ function connect() {
     const m = JSON.parse(e.data);
     if (m.type === 'calAck' && acks.has(m.id)) { acks.get(m.id)(true); acks.delete(m.id); }
     if ((m.type === 'calGranted' || m.type === 'calBusy') && lockWaiter) { lockWaiter(m.type === 'calGranted'); lockWaiter = null; }
-    if (m.type === 'adCalStarted' && adCalWaiter) { adCalWaiter(m); adCalWaiter = null; }
+    if ((m.type === 'adCalStarted' || m.type === 'adCalWritten') && adCalWaiter) { adCalWaiter(m); adCalWaiter = null; }
     if (m.type === 'state' || m.type === 'calib') curCalib = m.calib;
     if (m.type === 'state') boardStatus = m.board?.status;
   };
@@ -580,16 +580,114 @@ async function capturePass(cams, pts, rN, ref, onStep) {
   for (let b = 0; b < bits; b++) { await show({ mode: 'dots', bit: b, pts, rN }); bitF.push(await grabAllFresh(cams)); }
   // Punkte je Kamera erkennen und in mm umrechnen, nur was auf der Scheibe liegt (Wand = andere Ebene)
   NDOTS = pts.length;
-  const corr = [];
+  const corr = [], raw = [];
   cams.forEach((c, ci) => {
     const { dots } = detectDots(B[ci], A[ci], bitF.map(f => f[ci]), Wf[ci]);
     for (const d of dots) {
+      raw.push({ cam: c.i, idx: d.idx, x: d.x, y: d.y });
       const mm = camToMm(c, [d.x, d.y], B[ci].w);
       if (Math.hypot(mm[0], mm[1]) < 225) corr.push({ mm, p: [pts[d.idx][0] * PROJ_W, pts[d.idx][1] * PROJ_H], cam: c.i });
     }
   });
-  return { B, Wf, corr };
+  return { B, Wf, corr, raw };
 }
+// ================= Eigene Kamera-Kalibrierung (ohne Autodarts-Cloud) =================
+// 1) Ringe im Kamerabild einpassen (Start: alte Autodarts-Lage, grobe Vorsuche, dann fein).
+// 2) Kameras, bei denen das nicht sicher klappt: Beamer über die guten Kameras auf die Scheibe einrichten,
+//    Punkte an bekannte mm-Positionen projizieren, aus den erkannten Punkten die Kamera berechnen.
+// 3) Ergebnis im Autodarts-Format (Kamerabild -> 1000er-Raum, inkl. entzerrter Variante) schreiben lassen.
+const MM2U = AD_UNITS_PER_170 / 170;
+const S_AD = [[MM2U, 0, 500], [0, MM2U, 500], [0, 0, 1]];
+const flat9 = H => { const k = H[2][2]; return H.flat().map(v => v / k); };
+async function camImage(i) {
+  await (await adFetch(i)).arrayBuffer().catch(() => {});
+  await sleep(1500);
+  const r = await adFetch(i);
+  const bmp = await createImageBitmap(await r.blob());
+  work.width = bmp.width; work.height = bmp.height; wctx.drawImage(bmp, 0, 0);
+  return wctx.getImageData(0, 0, bmp.width, bmp.height);
+}
+function camGlobalFit(cm, T0) {
+  const coarse = RING_SAMPLES.filter(s => s.want && [166, 103].some(r => Math.abs(Math.hypot(...s.p) - r) < 0.5));
+  const score2 = TT => { const H = fitH(BOARD, TT); let sc = 0;
+    for (const { p, want } of coarse) { const [x, y] = apply(H, p), xi = Math.round(x), yi = Math.round(y);
+      if (xi < 0 || yi < 0 || xi >= cm.w || yi >= cm.h) continue; const c = cm.m[yi * cm.w + xi]; sc += c === want ? 1 : c ? -1 : 0; }
+    return sc; };
+  const c0 = apply(fitH(BOARD, T0), [0, 0]), cand = [];
+  for (let dx = -150; dx <= 150; dx += 15) for (let dy = -120; dy <= 120; dy += 15) for (const sc of [0.8, 0.9, 1, 1.1, 1.2]) for (const rd of [-10, -5, 0, 5, 10]) {
+    const a = rd * Math.PI / 180, co = Math.cos(a) * sc, si = Math.sin(a) * sc;
+    const TT = T0.map(([x, y]) => [c0[0] + co * (x - c0[0]) - si * (y - c0[1]) + dx, c0[1] + si * (x - c0[0]) + co * (y - c0[1]) + dy]);
+    cand.push({ TT, v: score2(TT) });
+  }
+  cand.sort((a, b) => b.v - a.v);
+  let best = null;
+  for (const S0 of [T0, ...cand.slice(0, 6).map(c => c.TT)]) { const r = refineBoard(cm, S0); if (!best || r.score > best.score) best = r; }
+  return { T: pickRotation(best.T, T0), score: best.score };
+}
+function undistortPt([u, v], f, cx, cy, k1) {
+  const x = (u - cx) / f, y = (v - cy) / f; let xu = x, yu = y;
+  for (let k = 0; k < 6; k++) { const fct = 1 + k1 * (xu * xu + yu * yu); xu = x / fct; yu = y / fct; }
+  return [xu * f + cx, yu * f + cy];
+}
+function adEntry(T, c, imgW) {
+  const k = c.width / imgW;                                   // Bild -> native Auflösung
+  const Hbc = fitH(BOARD, T.map(([x, y]) => [x * k, y * k]));  // mm -> Kamera px (verzerrt, native)
+  const f = c.k?.[0]?.[0] || 791.33, cx = c.k?.[0]?.[2] || c.width / 2, cy = c.k?.[1]?.[2] || c.height / 2, k1 = c.d?.[0] || 0;
+  const src = [], dst = [];
+  for (let y = -220; y <= 220; y += 20) for (let x = -220; x <= 220; x += 20) if (Math.hypot(x, y) <= 225) {
+    src.push(undistortPt(apply(Hbc, [x, y]), f, cx, cy, k1)); dst.push([500 + x * MM2U, 500 + y * MM2U]);
+  }
+  return { homography: flat9(mul(S_AD, inv(Hbc))), undistorted: flat9(fitH(src, dst)) };
+}
+async function ownCameraCalibration() {
+  const g = await (await fetch('/ad/config/calibration/geometry', { cache: 'no-store' })).json();
+  const cams = (g.cams || []).map((c, i) => ({ ...c, i })).filter(c => c.width && c.homography);
+  if (!cams.length) throw new Error('keine Kamera gefunden');
+  const n = RING_SAMPLES.filter(s => s.want).length * 2;
+  const fits = [];
+  for (const c of cams) {
+    status(`Eigene Kamera-Kalibrierung: Kamera ${c.i + 1} – Ringe suchen …`);
+    const img = await camImage(c.i);
+    const T0 = await autodartsTaps(c.i, img.width);
+    const r = camGlobalFit(colorMap(img), T0);
+    fits.push({ c, img, T: r.T, score: r.score, how: 'Ringe' });
+  }
+  const GOOD = 0.45;
+  const good = fits.filter(f => f.score >= GOOD), bad = fits.filter(f => f.score < GOOD);
+  if (!good.length) throw new Error('Scheibe in keinem Kamerabild sicher gefunden (Licht an? Scheibe frei?)');
+  if (bad.length) {
+    status(`Eigene Kamera-Kalibrierung: Kamera ${bad.map(f => f.c.i + 1).join(', ')} über den Beamer …`);
+    const asAd = f => ({ i: f.c.i, width: f.img.width, homography: mul(S_AD, inv(fitH(BOARD, f.T))) });
+    const goodCams = good.map(asAd);
+    for (const c of fits) lastFrame.set(c.c.i, await grabLumCam(c.c.i, 1));
+    const G1 = []; for (let y = 0; y < 9; y++) for (let x = 0; x < 16; x++) G1.push([0.04 + 0.92 * x / 15, 0.04 + 0.92 * y / 8]);
+    const p1 = await capturePass(goodCams, G1, 0.011, null, () => {});
+    const fitPB = p1.corr.length >= 6 ? fitRobust(p1.corr.map(c => c.mm), p1.corr.map(c => c.p)) : null;
+    if (!fitPB) throw new Error('Beamer über die gute Kamera nicht einrichtbar (' + p1.corr.length + ' Punkte)');
+    const MMP = [];
+    for (let y = -195; y <= 195; y += 30) for (let x = -195; x <= 195; x += 30) if (Math.hypot(x, y) < 205 && MMP.length < 126) MMP.push([x, y]);
+    const PTS = MMP.map(q => { const [x, y] = apply(fitPB.H, q); return [x / PROJ_W, y / PROJ_H]; });
+    const badCams = bad.map(f => ({ i: f.c.i, width: f.img.width, homography: f.c.homography }));
+    const p2 = await capturePass(badCams, PTS, 0.009, null, () => {});
+    await pattern(null);
+    for (const f of bad) {
+      const det = p2.raw.filter(d => d.cam === f.c.i);
+      const fr = det.length >= 8 ? fitRobust(det.map(d => MMP[d.idx]), det.map(d => [d.x, d.y])) : null;
+      if (!fr) continue;
+      f.T = BOARD.map(q => apply(fr.H, q)); f.score = boardScore(colorMap(f.img), f.T) / n; f.how = `Beamer (${fr.inliers.length} Punkte, ${fr.rms.toFixed(1)} px)`; f.err = fr.rms; f.viaBeamer = true;
+    }
+  }
+  const use = fits.filter(f => f.score >= GOOD || f.viaBeamer);
+  if (!use.length) throw new Error('keine Kamera sicher vermessen');
+  const entries = use.map(f => ({ index: f.c.i, ...adEntry(f.T, f.c, f.img.width), error: +(f.err || 2).toFixed(2) }));
+  const res = await new Promise(r => { adCalWaiter = r; send({ type: 'adWriteCalibration', cams: entries }); setTimeout(() => { if (adCalWaiter) { adCalWaiter = null; r({ ok: false, status: 'keine Antwort' }); } }, 20000); });
+  if (!res.ok) throw new Error('Schreiben fehlgeschlagen: ' + res.status);
+  const info = fits.map(f => `Kam ${f.c.i + 1}: ${use.includes(f) ? f.how : 'nicht vermessen'}`).join(', ');
+  camCalWarning = 'Kameras selbst kalibriert (Autodarts-Cloud nicht erreichbar) – ' + info + '.';
+  status(camCalWarning);
+  await sleep(6000);                                          // Autodarts startet mit der neuen Kalibrierung neu
+}
+
 async function recalibrateCameras() {
   const geo = async () => (await fetch('/ad/config/calibration/geometry', { cache: 'no-store' })).json();
   for (let t = 0; t < 20; t++) {                  // Kameras müssen laufen
@@ -599,8 +697,13 @@ async function recalibrateCameras() {
   status('Autodarts kalibriert die Kameras … (Scheibe frei lassen)');
   const res = await new Promise(r => { adCalWaiter = r; send({ type: 'adCalibrate' }); setTimeout(() => { if (adCalWaiter) { adCalWaiter = null; r({ ok: false, status: 'keine Antwort' }); } }, 95000); });
   if (!res.ok) {
-    // Autodarts behält dann still die alte Kalibrierung. Weitermachen, aber am Ende deutlich warnen.
-    camCalWarning = 'Achtung: Autodarts konnte die Kameras nicht neu kalibrieren (' + (res.body || res.status) + ') – es gilt die alte Kamera-Kalibrierung. Wurden Kameras verstellt, stimmen Erkennung und Beamer nicht; später erneut einrichten.';
+    // Cloud kaputt -> Kameras selbst vermessen (Ringe im Bild, notfalls über den Beamer)
+    if (res.restored) await sleep(6000);
+    try { await ownCameraCalibration(); return; }
+    catch (e) { status('Eigene Kamera-Kalibrierung: ' + e.message, 'err'); await sleep(2500); }
+    // Autodarts behält dann die alte Kalibrierung. Weitermachen, aber am Ende deutlich warnen.
+    camCalWarning = 'Achtung: Autodarts konnte die Kameras nicht neu kalibrieren (' + (res.body || res.status) + ')' + (res.restored ? ' – alte Kamera-Kalibrierung wiederhergestellt' : '') + '. Wurden Kameras verstellt, stimmen Erkennung und Beamer nicht genau; später erneut einrichten.';
+    await sleep(res.restored ? 6000 : 0);   // Autodarts startet nach dem Zurückspielen neu
     status(camCalWarning, 'err');
     await sleep(2500);
     return;
@@ -689,7 +792,7 @@ async function autoSetup() {
     send({ type: 'calibMode', on: false });
     await sleep(800);
     send({ type: 'adRestart', why: 'nach Beamer-Einrichtung' });   // neues Referenzbild unter normalem Licht
-    status(`✓ Fertig: Beamer auf die Scheibe eingerichtet (≈ ${mmErr.toFixed(1)} mm), Score angedockt, Autodarts neu gestartet.` + (camCalWarning ? ' ' + camCalWarning : ''), camCalWarning ? 'err' : 'ok');
+    status(`✓ Fertig: Beamer auf die Scheibe eingerichtet (≈ ${mmErr.toFixed(1)} mm), Score angedockt, Autodarts neu gestartet.` + (camCalWarning ? ' ' + camCalWarning : ''), /^Achtung/.test(camCalWarning) ? 'err' : 'ok');
     parent !== window && parent.postMessage({ type: 'setupDone' }, '*');
   } catch (e) {
     await pattern(null);
